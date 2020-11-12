@@ -1,0 +1,688 @@
+@comment_type // %s
+@s
+
+--- gltf_model_viewer.h
+#ifndef GLTF_MODEL_VIEWER_H
+#define GLTF_MODEL_VIEWER_H
+
+#include "solution.h"
+#include "gltf_model.h"
+#include "coordinate_axis.h"
+#include "skeleton_group.h"
+#include "directional_lighting.h"
+#include "color_pass.h"
+#include "environment_cube.h"
+
+class GltfModelViewer : public Solution::Project{
+public:
+    GltfModelViewer(const std::string& name);
+
+public:
+    void setup() override;
+    void show(size_t cIndex, size_t pIndex) override;
+    void exit() override;
+
+private:
+    void render(Solution::Pane& pane, bool isMainView);
+
+    void showMainView(Solution::Pane& pane);
+    void showInformation(Solution::Pane& pane);
+    void showSideView(Solution::Pane& pane);
+    void showControlPanel(Solution::Pane& pane);
+
+private:
+    std::vector<tow::Shader> shaders;
+
+    CameraPtr defaultCam;
+    tow::FramebufferPtr colorPassFb;
+    tow::FramebufferPtr imagePassFb;
+
+    GltfModelPtr tfModel;
+
+    DirectionalLightingPtr dirLighting;
+
+    ColorPassPtr colorPass;
+    ColorPassPtr fxaaPass;
+
+    SkeletonGroupPtr skGroup;
+
+    EnvironmentCubePtr envCube;
+    EnvironmentCubePtr envIrradianceCube;
+
+    tow::TextureGroupPtr matcapTexGroup;
+
+    std::vector<std::string> logs;
+
+    // control panel parameter
+    struct PanelParameter{
+        float gamma{2.2f};
+
+        size_t passNameIndex{0};
+        size_t modelFilenameIndex{0};
+        size_t envMapIndex{1};
+
+        size_t aaIndex{0};
+
+        bool shadow{true};
+
+        size_t aniIndex{0};
+        bool aniPaused{false};
+        float aniSpeed{1.0f};
+
+        bool skeleton{false};
+        float jointScale{0.0f};
+        glm::u8vec3 boneColor{0, 255, 0};
+    };
+    PanelParameter panelParam;
+    std::vector<std::string> modelFilenames;
+    std::vector<std::pair<std::string, std::string>> passNameMap;
+    size_t defaultModelCount{0};
+};
+#endif
+---
+
+--- gltf_model_viewer.cpp
+#include "gltf_model_viewer.h"
+
+#include "glm.hpp"
+#include "gtc/matrix_transform.hpp"
+#include "gtx/quaternion.hpp"
+
+#include "example_util.h"
+#include "asset_manager.h"
+
+#include <chrono>
+
+using namespace tow;
+using namespace ImGui;
+using namespace glm;
+
+//---------------------------------
+// gltf model viewer implemention
+GltfModelViewer::GltfModelViewer(const std::string& projName) : Project(projName) {
+
+    projLayout.setFunc([](Solution::Layout& layout, const ImVec2& initSize, const ImVec2& winSize){
+        if (layout.getPane(1, 0).isCollapsed()){
+            auto& io = GetIO();
+            auto& style = GetStyle();
+            auto titleBarHeight = io.Fonts->Fonts[0]->FontSize + style.FramePadding.y * 2;
+            layout.getPane(1, 0).height = titleBarHeight;
+            layout.getPane(1, 1).height = winSize.y - titleBarHeight;
+        }else{
+            layout.getPane(1, 1).height = layout.getPane(1, 1).ratio * initSize.y;
+            layout.getPane(1, 0).height = winSize.y - layout.getPane(1, 1).height;
+        }
+
+        if (layout.getPane(0, 1).isCollapsed()){
+            layout.getPane(0, 0).height = winSize.y;
+            layout.getPane(0, 1).height = 0;
+        }else{
+            layout.getPane(0, 1).height = layout.getPane(0, 1).ratio * initSize.y;
+            layout.getPane(0, 0).height = winSize.y - layout.getPane(0, 1).height;
+        }
+    });
+
+    projLayout.setColumns({
+        {"Left Column", 0.6f, {{"Main View", 0.6f}, {"Information", 0.4f}}},
+        {"Right Column", 0.4f, {{"Side View", 0.5f}, {"Control Panel", 0.5f}}}
+    });
+
+    modelFilenames = {
+        "assets/models/sphere/scene.gltf",
+        "assets/models/animal_ninja/scene.gltf",
+        "assets/models/glTF-Blender-Exporter-polly/project_polly.gltf",
+        "assets/models/kgirls01/scene.gltf",
+        "assets/models/spartan_armour_mkv_-_halo_reach/scene.gltf",
+    };
+
+    defaultModelCount = modelFilenames.size();
+
+    shaders = {
+        "assets/shaders/gltf_model_viewer.vert",
+        "assets/shaders/gltf_model_viewer.geom",
+        "assets/shaders/gltf_model_viewer.frag"
+    };
+
+    passNameMap = {
+        {"Wireframe", "wireframe"},
+        {"Vertex Color", "vertexColor"},
+        {"Base Color", "baseColor"},
+        {"Metallic", "metallic"},
+        {"Roughness", "roughness"},
+        {"Occlusion", "occlusion"},
+        {"Emissive", "emissive"},
+        {"Normal", "normal"},
+        {"Matcap", "matcap"},
+    };
+}
+
+void GltfModelViewer::exit(){
+    colorPassFb = nullptr;
+    imagePassFb = nullptr;
+    tfModel = nullptr;
+    dirLighting = nullptr;
+    fxaaPass = nullptr;
+    colorPass = nullptr;
+    skGroup = nullptr;
+    envCube = nullptr;
+    envIrradianceCube = nullptr;
+    matcapTexGroup = nullptr;
+    panelParam = PanelParameter();
+}
+
+void GltfModelViewer::setup(){
+    //--------------
+    // framebuffers
+    colorPassFb = Framebuffer::create();
+
+    auto sp = SamplerParam::create();
+    imagePassFb = Framebuffer::create(1, 1);
+    imagePassFb->addAttachment("f_color", {"s_color", sp, GL_RGB8});
+    imagePassFb->setDepthAttachment({"s_depth", sp, GL_DEPTH_COMPONENT24});
+
+    //----------------
+    // default camera
+    Camera::Persp camPersp;
+    camPersp.yfov = 30.0f;
+    camPersp.znear = 0.1f;
+    camPersp.aspectRatio = 1.0f;
+
+    Camera::View camView;
+
+    defaultCam = Camera::create(camView, camPersp);
+
+    //--------------
+    // lights
+    ShaderVarTable svTable(shaders);
+    svTable.buildBlock();
+    dirLighting = DirectionalLighting::create(svTable.getUniformBlockMap().get("DirectionalLighting"));
+
+    //-----------------
+    // post-processing
+    colorPass = ColorPass::create({
+        "assets/shaders/color_pass.vert",
+        "assets/shaders/color_pass.frag"
+    });
+
+    fxaaPass = ColorPass::create({
+        "assets/shaders/fxaa.vert",
+        "assets/shaders/fxaa.frag"
+    });
+
+    //-------------------
+    // environment cubes
+    envCube = EnvironmentCube::create("assets/env_maps/%s.jpg");
+    envIrradianceCube = EnvironmentCube::create("assets/env_maps/sh_%s.png");
+
+    //------------------
+    // matcap maps
+    matcapTexGroup = TexGroup::create();
+    ImageAsset()->loadImage8(
+        "assets/matcap_maps/matcap0.jpg", {matcapTexGroup, "s_matcap"}, true);
+
+    //------------
+    // gltf model
+    auto start = std::chrono::steady_clock::now();
+    const auto& filename = modelFilenames.at(panelParam.modelFilenameIndex);
+    tfModel = ModelAsset()->loadModel(filename, shaders);
+    auto end = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    std::string log;
+    strFormat(log, "[info] '%s' is loaded, take time: %.2fs", filename.c_str(), duration / 1000.0f);
+    logs.push_back(std::move(log));
+
+    // set common uniforms
+    for(const auto& prog : tfModel->getPrograms()){
+        prog->bindUniformBlock("DirectionalLighting", dirLighting->getBufferBinding());
+        prog->setUniformf("u_gamma", panelParam.gamma);
+    }
+
+    // make sure model is always inside the view cone
+    auto direction = normalize(vec3(0.852f, 0.418f, 5.824f));
+    auto& view = defaultCam->getView();
+    auto& persp = defaultCam->getPersp();
+
+    view.target = tfModel->getCenterPosition();
+    view.up = vec3(0, 1, 0);
+    view.eye = view.target + direction;
+    auto viewMat = defaultCam->getViewMat();
+
+    auto maxv = vec2(std::numeric_limits<float>::min());
+    auto minv = vec2(std::numeric_limits<float>::max());
+    for(const auto& vert : tfModel->getAABB()){
+        auto v = vec2(viewMat * vec4(vert, 1));
+        if (v.x < minv.x) minv.x = v.x;
+        if (v.x > maxv.x) maxv.x = v.x;
+        if (v.y < minv.y) minv.y = v.y;
+        if (v.y > maxv.y) maxv.y = v.y;
+    }
+    auto extent = max(max(abs(maxv.y), abs(minv.y)), max(abs(maxv.x), abs(minv.x)));
+    auto distance = extent * 1.2f / tanf(radians(persp.yfov * 0.5f));
+
+    view.eye = view.target + direction * distance;
+    persp.zfar = distance * 10.0f;
+
+    //----------------
+    // skeleton group
+    skGroup = SkeletonGroup::create(tfModel);
+    skGroup->setColor(panelParam.boneColor);
+
+    //-----------------
+    // scale objects
+    auto aabbExtent = length(tfModel->getMaxPosition() - tfModel->getMinPosition());
+    envIrradianceCube->setScale(aabbExtent * 1000.0f);
+    envCube->setScale(aabbExtent * 1000.0f);
+    panelParam.jointScale = 0;
+
+    //------------
+    // reset
+    panelParam.aniIndex = 0;
+}
+
+void GltfModelViewer::render(Solution::Pane& pane, bool isMainView){
+    //------------------------
+    // handle dropped files
+    if (!droppedFiles->empty()){
+        const auto& path = droppedFiles->at(0);
+        auto suffix = getSuffix(path);
+        if (suffix == "gltf" || suffix == "glb"){
+            modelFilenames.push_back(path);
+            panelParam.modelFilenameIndex = modelFilenames.size() - 1;
+            droppedFiles->clear();
+            setup();
+        }
+    }
+
+    //-------------------
+    // update camera
+    manipulateCamera(defaultCam, pane);
+
+    defaultCam->getPersp().aspectRatio = pane.window.getAspectRatio();
+
+    //--------------
+    // update model
+    if (isMainView && !panelParam.aniPaused){
+        tfModel->update(pane.window.dt * panelParam.aniSpeed, defaultCam, panelParam.aniIndex);
+    }
+
+    // set common uniforms
+    auto pvMat = defaultCam->getPerspViewMat();
+    auto viewMat = defaultCam->getViewMat();
+    auto& eye = defaultCam->getView().eye;
+    for(const auto& prog : tfModel->getPrograms()){
+        prog->setSampler(envIrradianceCube->getTexGroup(), "s_cube", "s_irradiance");
+        prog->setSampler(matcapTexGroup, "s_matcap");
+        prog->setUniformf("u_eyePos", {&eye, 3});
+        prog->setUniformf("u_pvMat", {&pvMat, 16});
+        prog->setUniformf("u_viewMat", {&viewMat, 16});
+        prog->setUniformf("u_viewportSize", {&pane.window.size, 2});
+        prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass",
+            isMainView ? "pbr" : passNameMap.at(panelParam.passNameIndex).second);
+    }
+
+    //----------------
+    // image pass
+    auto size = panelParam.aaIndex == 0 ? pane.window.size * 2.0f : pane.window.size;
+    imagePassFb->bindSize(&size.x);
+
+    // clear states
+    glEnable(GL_DEPTH_TEST);
+    glClearDepth(1.0f);
+    glClearColor(0.7f, 0.7f, 0.7f, 1.0f);
+    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+
+    // draw environment map
+    glDepthFunc(GL_LEQUAL);
+    if (panelParam.envMapIndex == 0){
+        envCube->draw(pvMat);
+    }else if (panelParam.envMapIndex == 1){
+        envIrradianceCube->draw(pvMat);
+    }
+    glDepthFunc(GL_LESS);
+
+    // draw model
+    for(const auto& tfNode : tfModel->getNodesContainMesh()){
+        const auto& modelMat = tfNode->getGlobalTsmMat();
+        auto normalMat = transpose(inverse(modelMat));
+        auto pvmMat = pvMat * modelMat;
+
+        for(const auto& tfPrimitive : tfNode->getMesh()->getPrimitives()){
+            auto prog = tfPrimitive.getPipeline()->getProgram();
+
+            prog->setUniformf("u_pvmMat", {&pvmMat, 16});
+            prog->setUniformf("u_modelMat", {&modelMat, 16});
+            prog->setUniformf("u_normalMat", {&normalMat, 16});
+
+            if (tfNode->getSkin()){
+                prog->setSubroutine(GL_VERTEX_SHADER, "u_tsm", "skin");
+                prog->bindUniformBlock("JointMatrixBlock", tfNode->getSkin()->getJointBufferBinding());
+            }else{
+                prog->setSubroutine(GL_VERTEX_SHADER, "u_tsm", "pvm");
+            }
+
+            if (prog->getVertexLayout()->has("a_color")){
+                auto& attr = prog->getVertexLayout()->getAttrib("a_color");
+                prog->setUniformi("u_colorComponentCount", attr.componentCount);
+            }else{
+                prog->setUniformi("u_colorComponentCount", 0);
+            }
+
+            tfPrimitive.draw();
+        }
+    }
+
+    //--------------
+    // color pass
+    colorPassFb->bindRect(pane.window.getRect());
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    glDepthMask(GL_FALSE);
+    if (panelParam.aaIndex == 1){
+        vec2 texelSize(1 / pane.window.size.x, 1 / pane.window.size.y);
+        fxaaPass->getProgram()->setUniformf("u_texelSize", {&texelSize, 2});
+        fxaaPass->draw(imagePassFb->getTexGroup(), "s_color");
+
+    }else{
+        colorPass->draw(imagePassFb->getTexGroup(), "s_color");
+    }
+    glDepthMask(GL_TRUE);
+
+    if (!isMainView && panelParam.skeleton){
+        skGroup->draw(pvMat);
+    }
+}
+
+void GltfModelViewer::show(size_t cIndex, size_t pIndex){
+    auto& pane = projLayout.getPane(cIndex, pIndex);
+    if (cIndex == 0){
+        switch(pIndex){
+            case 0: showMainView(pane); break;
+            case 1: showInformation(pane); break;
+            default: assert(false);
+        }
+    }else if (cIndex == 1){
+        switch(pIndex){
+            case 0: showSideView(pane); break;
+            case 1: showControlPanel(pane); break;
+            default: assert(false);
+        }
+    }
+}
+
+void GltfModelViewer::showMainView(Solution::Pane& pane){
+    auto bgColor = pane.window.focused ? ImVec4(0, 0, 0, 1) : GetStyleColorVec4(ImGuiCol_WindowBg);
+    auto winFlags = ImGuiWindowFlags_NoTitleBar;
+
+    PushStyleColor(ImGuiCol_WindowBg, bgColor);
+    PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2, 2));
+    BeginPane(pane.name.c_str(), pane.height, winFlags, !projLayout.getPane(0, 1).isCollapsed());
+        BeginChild("child");
+            pane.update();
+            GetWindowDrawList()->AddCallback([](const ImDrawList* parent_list, const ImDrawCmd* cmd){
+                (void)parent_list;
+                auto viewer = (GltfModelViewer*)(cmd->UserCallbackData);
+                viewer->render(viewer->projLayout.getPane(0, 0), true);
+            }, this);
+
+            GetWindowDrawList()->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+
+            //-------------------------
+            // a button for unfolding
+            if (projLayout.getPane(0, 1).isCollapsed()){
+                auto winPadding = GetStyle().WindowPadding;
+                auto unfoldBtnPos = GetWindowSize() - ImVec2(winPadding.x, winPadding.y) * 0.5f;
+                auto unfoldBtnColor = ImVec4(0, 0, 0, 0);
+
+                PushStyleColor(ImGuiCol_Button, unfoldBtnColor);
+                if (ButtonWithPivot(ICON_FA_ANGLE_DOUBLE_UP, unfoldBtnPos, ImVec2(1, 1))){
+                    projLayout.getPane(0, 1).state = Solution::State::NORMAL;
+                }
+                PopStyleColor();
+            }
+
+            //------------------
+            // help text
+            auto sz = CalcTextSize("(?)");
+            SetCursorPos({GetWindowContentRegionWidth() - sz.x, 0});
+            Text("(?)");
+            if (IsItemHovered())
+            {
+                BeginTooltip();
+                PushTextWrapPos(GetFontSize() * 35.0f);
+                TextUnformatted("Drop a 'gltf/glb' file into the viewer to open it");
+                PopTextWrapPos();
+                EndTooltip();
+            }
+
+        EndChild();
+    EndPane();
+    PopStyleVar(2);
+    PopStyleColor();
+}
+
+void GltfModelViewer::showInformation(Solution::Pane& pane){
+    auto winFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar;
+    auto tabBarFlags = ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_NoTooltip;
+    auto& style = GetStyle();
+    auto winPadding = style.WindowPadding;
+    auto winBorderSize = ImVec2(style.WindowBorderSize, style.WindowBorderSize);
+
+    BeginPane(pane.name.c_str(), pane.height, winFlags);
+        //-------------------------
+        // some header information
+        SetCursorPos(winPadding);
+        Text("Draw Calls: %u, Vertices: %u, FPS: %.1f", tfModel->getNumPrimitives(), tfModel->getNumVertices(),
+            GetIO().Framerate);
+        Separator();
+        auto tabBarStartPos = GetCursorPos();
+
+        //-------------------------
+        // a button for folding
+        auto foldBtnPos = ImVec2(GetWindowWidth(), 0) + ImVec2(-winPadding.x, winPadding.y) * 0.5f;
+        auto foldBtnColor = GetStyleColorVec4(ImGuiCol_WindowBg);
+
+        PushStyleColor(ImGuiCol_Button, foldBtnColor);
+        if (ButtonWithPivot(ICON_FA_ANGLE_DOUBLE_DOWN, foldBtnPos, ImVec2(1, 0))){
+            pane.state = Solution::State::COLLAPSED;
+        }
+        PopStyleColor();
+
+        //-------------------------------------------------------
+        // a tab bar for showing different kinds of information
+        SetCursorPos(tabBarStartPos);
+        if (BeginTabBar("tab bar", tabBarFlags)){
+            if (BeginTabItem("Asset")){
+                BeginChild("child");
+                    BeginGroup();
+                        const auto& assetInfo = tfModel->getAssetInfo();
+                        Text("Version: %s", assetInfo.version.c_str());
+                        Text("Generator: %s", assetInfo.generator.c_str());
+                        Text("Min Version: %s", assetInfo.minVersion.c_str());
+                        Text("Copyright: %s", assetInfo.copyright.c_str());
+                        Text("Extensions:");
+                        for(const auto& ex : assetInfo.extensions){
+                            BulletText(ex.c_str());
+                        }
+                        Text("Extras:");
+                        for(const auto& pr : assetInfo.extras){
+                            BulletText("%s: %s", pr.first.c_str(), pr.second.c_str());
+                        }
+                    EndGroup();
+                EndChild();
+                EndTabItem();
+            }
+            if (BeginTabItem("Stats")){
+                BeginChild("child");
+                    BeginGroup();
+                        Text("Nodes: %u", tfModel->getNodes().size());
+                        Text("Meshes: %u", tfModel->getMeshes().size());
+                        Text("Materials: %u", tfModel->getMaterials().size());
+                        Text("Cameras: %u", tfModel->getCameras().size());
+                        Text("Animations: %u", tfModel->getAnimations().size());
+                        Text("Skins: %u", tfModel->getSkins().size());
+                        for(const auto& tfSkin : tfModel->getSkins()){
+                            BulletText("Joints: %u", tfSkin->getNumJoints());
+                        }
+                        Text("Pipelines: %u", tfModel->getPipelines().size());
+                        Text("Textures: %u", tfModel->getNumTextures());
+
+                    EndGroup();
+                EndChild();
+                EndTabItem();
+            }
+            if (BeginTabItem("Log")){
+                BeginChild("child", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+                    for(const auto& log : logs){ Text(log.c_str()); }
+
+                    static auto logSize = logs.size();
+                    static bool scrollToBottom = false;
+                    if (scrollToBottom){ SetScrollY(GetScrollMaxY()); }
+                    if (logSize < logs.size()){
+                        logSize = logs.size();
+                        scrollToBottom = true;
+                    }else{
+                        scrollToBottom = false;
+                    }
+
+                EndChild();
+                EndTabItem();
+            }
+
+            EndTabBar();
+        }
+    EndPane();
+}
+
+void GltfModelViewer::showSideView(Solution::Pane& pane){
+    auto winFlags = 0;
+    if (BeginPane(pane.name.c_str(), pane.height, winFlags, !pane.isCollapsed())){
+        //------------------
+        // shading
+        AlignTextToFramePadding();
+        Text("Shading"); SameLine();
+        SetNextItemWidth(120);
+        const auto& curPassName = passNameMap.at(panelParam.passNameIndex).first;
+        if (BeginCombo("##shading", curPassName.c_str())){
+            for(size_t i = 0; i < passNameMap.size(); ++i){
+                if (Selectable(passNameMap[i].first.c_str())){
+                    panelParam.passNameIndex = i;
+                }
+            }
+            EndCombo();
+        }
+
+        //------------------
+        // rendering view
+        auto height = GetWindowHeight() - GetStyle().WindowPadding.y - GetCursorPos().y;
+        BeginChild("child", ImVec2(0, height));
+            pane.update();
+
+            GetWindowDrawList()->AddCallback([](const ImDrawList* parent_list, const ImDrawCmd* cmd){
+                (void)parent_list;
+                auto viewer = (GltfModelViewer*)(cmd->UserCallbackData);
+                viewer->render(viewer->projLayout.getPane(1, 0), false);
+            }, this);
+
+            GetWindowDrawList()->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+        EndChild();
+
+        pane.state = Solution::State::NORMAL;
+
+    }else{
+        pane.state = Solution::State::COLLAPSED;
+    }
+    EndPane();
+}
+
+void GltfModelViewer::showControlPanel(Solution::Pane& pane){
+    auto winFlags = ImGuiWindowFlags_NoCollapse;
+    if (BeginPane(pane.name.c_str(), pane.height, winFlags, !projLayout.getPane(1, 0).isCollapsed())){
+        //---------------
+        // model list
+        Text("Model");
+        std::string curFilename;
+        if (panelParam.modelFilenameIndex < defaultModelCount){
+            curFilename = modelFilenames.at(panelParam.modelFilenameIndex);
+        }
+        if (BeginCombo("##model filename", curFilename.c_str())){
+            for(size_t i = 0; i < defaultModelCount; ++i){
+                if (Selectable(modelFilenames[i].c_str())){
+                    panelParam.modelFilenameIndex = i;
+                    setup();
+                }
+            }
+            EndCombo();
+        }
+
+        //---------------------
+        // animation
+        Separator();
+        Text("Animation");
+        if (Button(panelParam.aniPaused ? ICON_FA_PLAY : ICON_FA_PAUSE)){
+            panelParam.aniPaused = !panelParam.aniPaused;
+        }
+        const auto& animations = tfModel->getAnimations();
+        std::string curAniName;
+        if (panelParam.aniIndex < animations.size()){
+            curAniName = animations.at(panelParam.aniIndex).getName();
+        }
+        SameLine();
+        if (BeginCombo("##animation name", curAniName.c_str())){
+            for(size_t i = 0; i < animations.size(); ++i){
+                if (Selectable(animations.at(i).getName().c_str())){
+                    panelParam.aniIndex = i;
+                }
+            }
+            EndCombo();
+        }
+        SliderFloat("Speed", &panelParam.aniSpeed, 0, 5.0f);
+
+        //-----------------
+        // skeleton
+        Separator();
+        Text("Skeleton");
+        Checkbox("Visible", &panelParam.skeleton);
+
+        //-------------------------
+        // post-processing
+        Separator();
+        Text("Post-processing");
+        const char* aaNames[] = { "SSAA", "FXAA" };
+        for(int i = 0; i < 2; ++i){
+            if (i > 0) { SameLine(); }
+            RadioButton(aaNames[i], (int*)&panelParam.aaIndex, i);
+        }
+
+        //-------------------
+        // lighting
+        Separator();
+        Text("Lighting");
+        const char* lightNames[] = { "Key", "Fill", "Back", "Ambient" };
+        for(int i = 0; i < 4; ++i){
+            if (TreeNode(lightNames[i])){
+                auto& light = dirLighting->getLights()[i];
+                bool changed = false;
+                changed |= ColorEdit3("Color", (float*)&light.color, ImGuiColorEditFlags_NoAlpha);
+                changed |= SliderFloat("Intensity", &light.intensity, 0, 10.0f, "%.1f");
+                if (changed) dirLighting->send(i);
+
+                TreePop();
+            }
+        }
+
+        //---------------------
+        // environment map
+        Separator();
+        Text("Environment Map");
+        const char* evnMapNames[] = {"Original", "Irradiance"};
+        for(int i = 0; i < 2; ++i){
+            if (i > 0){ SameLine(); }
+            RadioButton(evnMapNames[i], (int*)&panelParam.envMapIndex, i);
+        }
+    }
+
+    EndPane();
+}
+---

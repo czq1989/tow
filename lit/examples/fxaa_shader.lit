@@ -1,0 +1,127 @@
+@comment_type // %s
+
+@s
+
+--- fxaa.vert
+#version 430 core
+
+in vec2 a_position;
+
+out vec2 v_texCoord;
+
+void main(){
+    gl_Position = vec4(a_position, -1, 1);
+
+    v_texCoord = a_position * 0.5 + 0.5;
+}
+---
+
+--- fxaa.frag
+#version 430 core
+
+in vec2 v_texCoord;
+
+uniform sampler2D s_color;
+uniform vec2 u_texelSize;
+
+out vec4 f_color;
+
+struct AreaLuminance{
+    float middle;
+    float left;
+    float right;
+    float up;
+    float down;
+    float leftUp;
+    float rightUp;
+    float leftDown;
+    float rightDown;
+    float minLum;
+    float maxLum;
+    float contrast;
+};
+AreaLuminance al;
+
+#define sampleLum(u, v) texture(s_color, v_texCoord + vec2((u), (v)) * u_texelSize).g
+
+#define sampleColor(offset) texture(s_color, v_texCoord + (offset)).rgb
+
+void sampleCrossLum(){
+    al.middle = sampleLum(0, 0);
+    al.left = sampleLum(-1, 0);
+    al.right = sampleLum(1, 0);
+    al.up = sampleLum(0, 1);
+    al.down = sampleLum(0, -1);
+
+    al.minLum = min(min(al.middle, al.left),
+        min(min(al.right, al.up), al.down));
+
+    al.maxLum = max(max(al.middle, al.left),
+        max(max(al.right, al.up), al.down));
+
+    al.contrast = al.maxLum - al.minLum;
+}
+
+void sampleCornerLum(){
+    al.leftUp = sampleLum(-1, 1);
+    al.leftDown = sampleLum(-1, -1);
+    al.rightUp = sampleLum(1, 1);
+    al.rightDown = sampleLum(1, -1);
+}
+
+float computeBlendFactor(){
+    float factor = 2 * (al.up + al.left + al.down + al.right);
+    factor += al.leftUp + al.leftDown + al.rightUp + al.rightDown;
+    factor *= 1.0 / 12;
+    factor = abs(factor - al.middle);
+    factor = clamp(factor / al.contrast, 0, 1);
+    factor = smoothstep(0, 1, factor);
+    return factor * factor;
+}
+
+vec2 computeBlendDirection(){
+    float verContrast =
+        2 * abs(al.up + al.down - 2 * al.middle) +
+        abs(al.rightUp + al.rightDown - 2 * al.right) +
+        abs(al.leftUp + al.leftDown - 2 * al.left);
+
+    float horContrast =
+        2 * abs(al.right + al.left - 2 * al.middle) +
+        abs(al.rightUp + al.leftUp - 2 * al.up) +
+        abs(al.rightDown + al.leftDown - 2 * al.down);
+
+    if (verContrast >= horContrast){
+        float diffGrad = abs(al.up - al.middle) - abs(al.down - al.middle);
+        float texelStep = diffGrad > 0 ? u_texelSize.y : -u_texelSize.y;
+
+        return vec2(0, texelStep);
+    }else{
+        float diffGrad = abs(al.right - al.middle) - abs(al.left - al.middle);
+        float texelStep = diffGrad > 0 ? u_texelSize.x : -u_texelSize.x;
+
+        return vec2(texelStep, 0);
+    }
+}
+
+uniform float u_contrastThreshold = 0.0312;
+uniform float u_relativeThreshold = 0.0643;
+uniform float u_intensity = 1.0;
+
+void main(){
+    vec3 color;
+
+    sampleCrossLum();
+    if (al.contrast < max(u_contrastThreshold, u_relativeThreshold * al.maxLum)){
+        color = sampleColor(vec2(0));
+    }else{
+        sampleCornerLum();
+
+        float factor = computeBlendFactor();
+        vec2 dir = computeBlendDirection();
+        color = sampleColor(dir * factor * u_intensity);
+    }
+
+    f_color = vec4(color, 1);
+}
+
+---

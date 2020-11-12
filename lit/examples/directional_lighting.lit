@@ -1,0 +1,113 @@
+@comment_type // %s
+
+@s
+
+--- directional_lighting.h
+#ifndef DIRECTIONAL_LIGHTING_H
+#define DIRECTIONAL_LIGHTING_H
+
+#include "tow.h"
+#include "glm.hpp"
+
+class DirectionalLighting;
+using DirectionalLightingPtr = tow::ResourcePtr<DirectionalLighting>;
+
+class DirectionalLighting{
+public:
+    struct Light{
+        glm::vec3 direction;
+        glm::vec3 color{1};
+        float intensity{1};
+    };
+
+private:
+    DirectionalLighting(){}
+
+public:
+    static DirectionalLightingPtr create(const tow::ShaderVarTable::Block& block);
+
+public:
+    auto& getKey() { return lights[0]; }
+    auto& getFill() { return lights[1]; }
+    auto& getBack() { return lights[2]; }
+    auto& getAmbient() { return lights[3]; }
+
+    auto& getLights() { return lights; }
+    const auto& getBufferBinding() const { return bufBinding; }
+
+public:
+    void send(int index);
+    void sendKey() { send(0); }
+    void sendFill() { send(1); }
+    void sendBack() { send(2); }
+    void sendAmbient() { send(3); }
+
+private:
+    tow::ShaderVarTable::Block lightingBlock;
+    tow::BufferBindingPtr bufBinding;
+    std::vector<Light> lights;
+
+};
+#endif
+---
+
+--- directional_lighting.cpp
+#include "directional_lighting.h"
+
+#include "example_util.h"
+
+using namespace tow;
+using namespace glm;
+
+DirectionalLightingPtr DirectionalLighting::create(const tow::ShaderVarTable::Block& lightingBlock){
+    auto ptr = new DirectionalLighting();
+    ptr->lightingBlock = lightingBlock;
+    ptr->lights.resize(4);
+
+    auto bufGroup = BufferGroup::create();
+    bufGroup->createBuffer("b_lights", nullptr,
+        {GL_ARRAY_BUFFER, 1, (size_t)lightingBlock.size, GL_STATIC_DRAW});
+
+    ptr->bufBinding = BufferBinding::create(GL_UNIFORM_BUFFER);
+    ptr->bufBinding->bind(bufGroup, "b_lights");
+
+    auto& key = ptr->lights[0];
+    key.direction = normalize(vec3(-0.26f, 0.09f, 1.0f));
+    key.intensity = 2.0f;
+
+    auto& fill = ptr->lights[1];
+    fill.direction = normalize(-key.direction + vec3(-0.53f, -0.49f, 0.06f));
+    fill.intensity = key.intensity * 0.5f;
+
+    auto& back = ptr->lights[2];
+    back.direction = vec3(key.direction.x, key.direction.y, -key.direction.z);
+    back.intensity = key.intensity * 2.0f;
+
+    auto& ambient = ptr->lights[3];
+    ambient.intensity = 1.0f;
+
+    for(int i = 0; i < 4; ++i){
+        ptr->send(i);
+    }
+
+    return DirectionalLightingPtr(ptr);
+}
+
+void DirectionalLighting::send(int index){
+    auto bufGroup = bufBinding->getBufferGroup();
+
+    std::string buf;
+    strFormat(buf, "u_dirLights[%d].", index);
+
+    bufGroup->write("b_lights", &lights[index].direction,
+        lightingBlock.get(buf + "direction").offset, sizeof(vec3));
+
+    bufGroup->write("b_lights", &lights[index].color,
+        lightingBlock.get(buf + "color").offset, sizeof(vec3));
+
+    bufGroup->write("b_lights", &lights[index].intensity,
+        lightingBlock.get(buf + "intensity").offset, sizeof(float));
+}
+
+
+---

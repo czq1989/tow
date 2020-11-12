@@ -1,0 +1,11 @@
+Model Information:
+* title:	Animal Ninja
+* source:	https://sketchfab.com/3d-models/animal-ninja-60bf79c6ed5841bfa548ce7508c7ebd3
+* author:	little.bucket (https://sketchfab.com/little.bucket)
+
+Model License:
+* license type:	CC-BY-NC-SA-4.0 (http://creativecommons.org/licenses/by-nc-sa/4.0/)
+* requirements:	Author must be credited. No commercial use. Modified versions must have the same license.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Animal Ninja" (https://sketchfab.com/3d-models/animal-ninja-60bf79c6ed5841bfa548ce7508c7ebd3) by little.bucket (https://sketchfab.com/little.bucket) licensed under CC-BY-NC-SA-4.0 (http://creativecommons.org/licenses/by-nc-sa/4.0/)

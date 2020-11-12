@@ -1,0 +1,79 @@
+@comment_type // %s
+
+@s
+
+--- ui_editor.vert
+#version 430 core
+
+in vec2 a_position;
+in vec2 a_texCoord;
+in vec4 a_color;
+
+uniform mat3 u_pvMat;
+
+out vec2 v_texCoord;
+out vec4 v_color;
+out vec2 v_position;
+
+void main(){
+    gl_Position = vec4(u_pvMat * vec3(a_position, 1), 1);
+
+    v_position = a_position;
+    v_texCoord = a_texCoord;
+    v_color = a_color;
+}
+---
+
+--- ui_editor.frag
+#version 430 core
+
+in vec2 v_position;
+in vec2 v_texCoord;
+in vec4 v_color;
+
+uniform sampler2D s_tex;
+
+out vec4 f_color;
+
+subroutine void RenderPass();
+subroutine uniform RenderPass u_pass;
+
+subroutine(RenderPass)
+void color(){
+    f_color = v_color;
+}
+
+subroutine(RenderPass)
+void image(){
+    f_color = texture(s_tex, v_texCoord);
+}
+
+//-----------------
+// grid pass
+uniform mat3 u_invModelMat;
+
+subroutine(RenderPass)
+void grid(){
+    vec2 p = vec2(u_invModelMat * vec3(v_position, 1));
+    vec2 a = floor(p / 10);
+    float b = fract((a.x + a.y) * 0.5);
+    if (b == 0){
+        f_color = vec4(0.95);
+    }else{
+        f_color = vec4(vec3(0.75), 1);
+    }
+}
+
+//--------
+// font
+subroutine(RenderPass)
+void font(){
+    float r = texture(s_tex, v_texCoord).r;
+    f_color = vec4(v_color.rgb, v_color.a * r);
+}
+
+void main(){
+    u_pass();
+}
+
+---

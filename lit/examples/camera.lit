@@ -1,0 +1,166 @@
+@s
+
+--- camera.h
+#ifndef CAMERA_H
+#define CAMERA_H
+
+#include "tow.h"
+#include "glm.hpp"
+
+class Camera;
+using CameraPtr = tow::ResourcePtr<Camera>;
+
+class Camera{
+public:
+    // projection
+    struct Persp{
+        float yfov{0};
+        float znear{0};
+        float zfar{0};
+        float aspectRatio{0};
+    };
+    struct Ortho{
+        glm::vec2 mag;
+        float znear{0};
+        float zfar{0};
+    };
+
+    // view
+    struct View{
+        glm::vec3 eye;
+        glm::vec3 target;
+        glm::vec3 up;
+    };
+
+private:
+    Camera(){}
+public:
+    ~Camera(){}
+
+public:
+    static CameraPtr create(const View& view, const Persp& persp);
+    static CameraPtr create(const View& view, const Ortho& ortho);
+    static CameraPtr create(const View& view, const Persp& persp, const Ortho& ortho);
+
+public:
+    // camera manipulation methods
+    void circle(const glm::mat4& rotMat);
+    void circleH(float angle); // circle horizontally
+    void circleV(float angle); // circle vertically
+    void circle(float xangle, float yangle);
+    void pull(float dist); // make objects near or far
+    void move(float dx, float dy);
+
+    // getter
+    auto& getView() { return view; }
+    auto& getPersp() { return persp; }
+    auto& getOrtho() { return ortho; }
+    glm::mat4 getPerspViewMat() const;
+    glm::mat4 getOrthoViewMat() const;
+    glm::mat4 getViewMat() const;
+    glm::mat4 getPerspMat() const;
+    glm::mat4 getOrthoMat() const;
+
+    // setter
+    void setView(const View& v) { view = v; }
+    void setPersp(const Persp& p) { persp = p; }
+    void setOrtho(const Ortho& o) { ortho = o; }
+
+private:
+    View view;
+    Persp persp;
+    Ortho ortho;
+};
+
+#endif
+---
+
+
+--- camera.cpp
+#include "camera.h"
+
+#include "gtc/matrix_transform.hpp"
+
+using namespace glm;
+
+CameraPtr Camera::create(const View& view, const Persp& persp){
+    return create(view, persp, {});
+}
+
+CameraPtr Camera::create(const View& view, const Ortho& ortho){
+    return create(view, {}, ortho);
+}
+
+CameraPtr Camera::create(const View& view, const Persp& persp, const Ortho& ortho){
+    auto ptr = new Camera();
+    ptr->view = view;
+    ptr->persp = persp;
+    ptr->ortho = ortho;
+    return CameraPtr(ptr);
+}
+
+void Camera::circle(const glm::mat4& rotMat){
+    auto rotViewRay = vec3(rotMat * vec4(view.eye - view.target, 0));
+    view.eye = rotViewRay + view.target;
+    view.up = normalize(vec3(rotMat * vec4(view.up, 0)));
+}
+
+void Camera::circleH(float angle){
+    auto rotMat = rotate(mat4(1.0f), radians(angle), vec3(0, 1.0f, 0));
+    circle(rotMat);
+}
+
+void Camera::circleV(float angle){
+    auto viewZ = normalize(view.eye - view.target);
+    auto viewX = normalize(cross(view.up, viewZ));
+    auto rotMat = rotate(mat4(1.0f), radians(angle), viewX);
+    circle(rotMat);
+}
+
+void Camera::circle(float xangle, float yangle){
+    circleH(xangle);
+    circleV(yangle);
+}
+
+void Camera::pull(float dist){
+    auto viewRay = view.target - view.eye;
+    auto maxDist = length(viewRay);
+    if (dist < maxDist){ // make sure the eye is always in front of target
+        view.eye += normalize(viewRay) * dist * maxDist;
+    }
+}
+
+void Camera::move(float dx, float dy){
+    auto maxDist = length(view.target - view.eye);
+    auto viewZ = normalize(view.eye - view.target);
+    auto viewX = normalize(cross(view.up, viewZ));
+    auto viewY = cross(viewZ, viewX);
+    auto offset = mat3(viewX, viewY, vec3(0)) * vec3(dx * maxDist, dy * maxDist, 0);
+    view.eye += offset;
+    view.target += offset;
+}
+
+mat4 Camera::getPerspViewMat() const{
+    return perspective(radians(persp.yfov), 1.0f / persp.aspectRatio, persp.znear, persp.zfar) *
+        lookAt(view.eye, view.target, view.up);
+}
+
+mat4 Camera::getOrthoViewMat() const{
+    return glm::ortho(-ortho.mag.x, ortho.mag.x,
+        -ortho.mag.y, ortho.mag.y, ortho.znear, ortho.zfar) *
+        lookAt(view.eye, view.target, view.up);
+}
+
+mat4 Camera::getViewMat() const{
+    return lookAt(view.eye, view.target, view.up);
+}
+
+mat4 Camera::getPerspMat() const{
+    return perspective(radians(persp.yfov), 1.0f / persp.aspectRatio, persp.znear, persp.zfar);
+}
+
+mat4 Camera::getOrthoMat() const{
+  return glm::ortho(-ortho.mag.x, ortho.mag.x,
+        -ortho.mag.y, ortho.mag.y, ortho.znear, ortho.zfar);
+}
+---

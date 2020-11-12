@@ -1,0 +1,284 @@
+@comment_type // %s
+
+@s
+
+--- gltf_model_viewer.vert
+#version 430 core
+
+in vec3 a_position;
+in vec3 a_normal;
+in vec4 a_tangent;
+in vec2 a_texCoord[10];
+in vec4 a_color;
+in vec4 a_joints;
+in vec4 a_weights;
+
+uniform mat4 u_pvmMat;
+uniform mat4 u_modelMat;
+uniform mat4 u_normalMat;
+uniform mat4 u_pvMat;
+uniform int u_colorComponentCount = 0;
+
+uniform JointMatrixBlock{
+    mat4 u_jointMats[512];
+};
+
+out vec3 v_position;
+out vec3 v_normal;
+out vec2 v_texCoord[10];
+out mat3 v_tbn;
+out vec4 v_color;
+
+subroutine void tsmFunc();
+subroutine uniform tsmFunc u_tsm;
+
+subroutine(tsmFunc)
+void pvm(){
+    gl_Position = u_pvmMat * vec4(a_position, 1);
+
+    v_position = vec3(u_modelMat * vec4(a_position, 1));
+    v_normal = normalize(vec3(u_normalMat * vec4(a_normal, 0)));
+}
+
+subroutine(tsmFunc)
+void skin(){
+    ivec4 jointIndices = ivec4(a_joints);
+
+    mat4 jointMat =
+        a_weights.x * u_jointMats[jointIndices.x] +
+        a_weights.y * u_jointMats[jointIndices.y] +
+        a_weights.z * u_jointMats[jointIndices.z] +
+        a_weights.w * u_jointMats[jointIndices.w];
+
+    v_position = vec3(jointMat * vec4(a_position, 1));
+    v_normal = normalize(vec3(transpose(inverse(jointMat)) * vec4(a_normal, 0)));
+
+    gl_Position = u_pvMat * vec4(v_position, 1);
+}
+
+void main(){
+    u_tsm();
+
+    for(int i = 0; i < 10; ++i){ v_texCoord[i] = a_texCoord[i]; }
+
+    vec3 bitangent = a_tangent.w * cross(v_normal, a_tangent.xyz);
+    v_tbn = mat3(a_tangent.xyz, bitangent, v_normal);
+
+    v_color = vec4(1);
+    for(int i = 0; i < u_colorComponentCount && i < 4; ++i){ v_color[i] = a_color[i]; }
+}
+---
+
+--- gltf_model_viewer.geom
+#version 430 core
+
+layout(triangles) in;
+layout(triangle_strip, max_vertices = 3) out;
+
+in vec3 v_position[3];
+in vec3 v_normal[3];
+in vec2 v_texCoord[3][10];
+in mat3 v_tbn[3];
+in vec4 v_color[3];
+
+out vec3 g_position;
+out vec3 g_normal;
+out vec2 g_texCoord[10];
+out mat3 g_tbn;
+out vec4 g_color;
+noperspective out vec3 g_height;
+
+uniform vec2 u_viewportSize;
+
+void main(){
+    float h1 = 0;
+    float h2 = 0;
+    float h3 = 0;
+
+    vec2 a = gl_in[0].gl_Position.xy / gl_in[0].gl_Position.w;
+    vec2 b = gl_in[1].gl_Position.xy / gl_in[1].gl_Position.w;
+    vec2 c = gl_in[2].gl_Position.xy / gl_in[2].gl_Position.w;
+
+    a = (a * 0.5 + 0.5) * u_viewportSize;
+    b = (b * 0.5 + 0.5) * u_viewportSize;
+    c = (c * 0.5 + 0.5) * u_viewportSize;
+
+    vec2 v1 = b - a;
+    vec2 v2 = c - a;
+    vec2 v3 = c - b;
+
+    float area = abs(v1.x * v2.y - v1.y * v2.x);
+    h1 = area / length(v2);
+    h2 = area / length(v1);
+    h3 = area / length(v3);
+
+    vec3 heights[] = vec3[3](vec3(0, 0, h3), vec3(h1, 0, 0), vec3(0, h2, 0));
+
+    for(int i = 0; i < 3; ++i){
+        gl_Position = gl_in[i].gl_Position;
+
+        g_position = v_position[i];
+        g_normal = v_normal[i];
+
+        for(int j = 0; j < 10; ++j) { g_texCoord[j] = v_texCoord[i][j]; }
+
+        g_tbn = v_tbn[i];
+        g_color = v_color[i];
+        g_height = heights[i];
+
+        EmitVertex();
+    }
+}
+---
+
+@include examples\schlick_brdf_shared.lit
+@include examples\gltf_material_shared.lit
+
+--- gltf_model_viewer.frag
+#version 430 core
+
+in vec3 g_position;
+in vec3 g_normal;
+in vec2 g_texCoord[10];
+in mat3 g_tbn;
+in vec4 g_color;
+noperspective in vec3 g_height;
+
+@{pbr uniforms}
+@{schlick brdf}
+
+uniform samplerCube s_irradiance;
+uniform sampler2D s_matcap;
+
+uniform mat4 u_viewMat;
+
+uniform float u_gamma = 2.2;
+uniform vec3 u_eyePos = vec3(8.6, 8, 4);
+
+struct Light{
+    vec3 direction;
+    vec3 color;
+    float intensity;
+};
+
+#define KEY     0
+#define FILL    1
+#define BACK    2
+#define AMBIENT 3
+
+uniform DirectionalLighting {
+    Light u_dirLights[4];
+};
+
+out vec4 f_color;
+
+// subrouines
+subroutine void RenderPass();
+
+subroutine uniform RenderPass u_pass;
+
+void main(){
+    u_pass();
+}
+
+// render pass subroutines
+subroutine(RenderPass)
+void pbr(){
+    @{material parameters}
+
+    // compute Lo
+    vec3 V = normalize(u_eyePos - g_position);
+    vec3 N = normal;
+
+    vec3 Li;
+    vec3 L;
+    float NdotL;
+    vec3 Lo = vec3(0);
+    vec3 Fdiff;
+    vec3 Fspec;
+
+    int indexArray[] = int[3]( KEY, FILL, BACK );
+    for(int i = 0; i < indexArray.length(); ++i){
+        int index = indexArray[i];
+
+        L = u_dirLights[index].direction;
+        Li = u_dirLights[index].color * u_dirLights[index].intensity;
+        NdotL = max(0, dot(N, L));
+
+        SchlickBRDF(baseColor.rgb, metallic, roughness, V, L, N, Fdiff, Fspec);
+
+        if (i == 1){
+            Lo += Fdiff * Li * NdotL;
+        }else{
+            Lo += (Fdiff + Fspec) * Li * NdotL;
+        }
+    }
+
+     vec3 irradiance = texture(s_irradiance, N).rgb;
+     Li = u_dirLights[AMBIENT].color * u_dirLights[AMBIENT].intensity;
+     vec3 ambient = Li * irradiance * baseColor.rgb * occlusion;
+
+    // output color
+    vec3 color;
+    color = ambient + emissive + Lo;
+
+    color = pow(color, vec3(1.0 / u_gamma));
+
+    f_color = vec4(color, baseColor.a);
+}
+
+subroutine(RenderPass)
+void baseColor(){
+    @{base color}
+    baseColor.rgb = pow(baseColor.rgb, vec3(1.0 / u_gamma));
+    f_color = baseColor;
+}
+
+subroutine(RenderPass)
+void normal(){
+    @{normal}
+    f_color = vec4(normal * 0.5 + 0.5, 1);
+}
+
+subroutine(RenderPass)
+void vertexColor(){
+    f_color = g_color;
+}
+
+subroutine(RenderPass)
+void emissive(){
+    @{emissive}
+    emissive = pow(emissive, vec3(1.0 / u_gamma));
+    f_color = vec4(emissive, 1);
+}
+
+subroutine(RenderPass)
+void occlusion(){
+    @{occlusion}
+    f_color = vec4(vec3(occlusion), 1);
+}
+
+subroutine(RenderPass)
+void metallic(){
+    @{metallic and roughness}
+    f_color = vec4(vec3(metallic), 1);
+}
+
+subroutine(RenderPass)
+void roughness(){
+    @{metallic and roughness}
+    f_color = vec4(vec3(roughness), 1);
+}
+
+subroutine(RenderPass)
+void matcap(){
+    vec3 normal = mat3(u_viewMat) * g_normal;
+    f_color = texture(s_matcap, (normal.xy * 0.5 + 0.5));
+}
+
+subroutine(RenderPass)
+void wireframe(){
+    float minHeight = abs(min(min(g_height.x, g_height.y), g_height.z));
+    f_color = vec4(mix(vec3(0.2), vec3(0.8), smoothstep(-0.5, 1.0, minHeight)), 1);
+}
+---

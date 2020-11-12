@@ -1,0 +1,2730 @@
+@comment_type // %s
+
+@s
+
+--- ui_editor.h
+#ifndef UI_EDITOR_H
+#define UI_EDITOR_H
+
+#include "tow.h"
+#include "solution.h"
+#include "asset_manager.h"
+
+class Renderer;
+using RendererPtr = tow::ResourcePtr<Renderer>;
+
+@{block}
+@{color}
+@{image}
+@{scale nine}
+@{text}
+@{button}
+@{geometry}
+@{renderer}
+@{ui editor}
+
+#endif
+---
+
+
+--- ui_editor.cpp
+#include "ui_editor.h"
+
+#include "gtx/matrix_transform_2d.hpp"
+#include "gtc/random.hpp"
+
+#include "example_util.h"
+#include "PsdParser.h"
+#include "json.hpp"
+
+#include <string>
+#include <fstream>
+#include <iomanip>
+
+using namespace ImGui;
+using namespace glm;
+
+@{util functions}
+@{block implemention}
+@{color implemention}
+@{image implemention}
+@{scale nine implemention}
+@{text implemention}
+@{button implemention}
+@{geometry implemention}
+@{renderer implemention}
+@{ui editor implemention}
+
+---
+
+--- util functions
+//=============================
+// utility functions
+
+//---------------
+// block frame
+static BlockPtr createBlockFrame(const Block::Layout& layout, const u8vec4& color){
+    constexpr float thickness = 2;
+
+    vec2 unit[] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    auto tMat = glm::translate(mat3(1), vec2(-thickness));
+
+    std::vector<vec2> points;
+    for(int i = 0; i < 4; ++i){
+        points.push_back(layout.size * unit[i]);
+    }
+    for(int i = 0; i < 4; ++i){
+        auto pt = tMat * vec3((layout.size + vec2(2 * thickness))* unit[i], 1);
+        points.push_back(vec2(pt));
+    }
+    std::vector<Block::IndexType> indices = {
+        4, 5, 1, 4, 1, 0,
+        5, 6, 2, 5, 2, 1,
+        6, 7, 3, 6, 3, 2,
+        7, 4, 0, 7, 0, 3
+    };
+
+    auto frameBlock = GeometryBlock::create("Frame", std::move(points), std::move(indices));
+    frameBlock->setMode(GL_TRIANGLES);
+    frameBlock->setColor(color);
+    frameBlock->setMatrix(layout.srtMat);
+
+    return frameBlock;
+}
+
+static BlockPtr createBlockFrame(const Block::Layout& layout, const Block::Appearance& app){
+    return createBlockFrame(layout, u8vec4(u8vec3(255) - u8vec3(app.color), 255));
+}
+
+//--------------------
+// copy block
+static BlockPtr copyBlock(const BlockPtr& block, const std::string& name){
+    auto bk = block->copy(name);
+    const auto& layout = block->getLayout();
+    auto rotMat = glm::rotate(mat3(1), radians(layout.rotation));
+    auto trans = vec2(rotMat * vec3(30, -30, 0));
+    bk->translate(layout.translation + trans);
+
+    return bk;
+}
+
+static BlockPtr copyBlock(const BlockPtr& block, size_t num){
+    std::string copyName;
+    strFormat(copyName, "copy_%u", num);
+    return copyBlock(block, copyName);
+}
+
+//----------------------------
+// create blocks from file
+static BlockPtr createBlockFromJson(const std::string& filename, const tow::TextureGroupPtr& texGroup){
+    using json = nlohmann::json;
+
+    std::ifstream ifile(filename);
+    json j;
+
+    ifile >> j;
+
+    // create root block
+    auto rootBlock = Block::create("root");
+    rootBlock->getLayout().size = {
+        j["root"]["size"][0].get<float>(), j["root"]["size"][1].get<float>()
+    };
+
+    // create child blocks
+    auto mgr = AssetManager::get();
+    const auto& children = j["children"];
+
+    for(const auto& child : children){
+        Block::Layout layout;
+        Block::Appearance app;
+
+        layout.size = {child["size"][0].get<float>(), child["size"][1].get<float>()};
+        layout.scale = {child["scale"][0].get<float>(), child["scale"][1].get<float>()};
+        layout.rotation = child["rotation"].get<float>();
+        layout.translation = {child["translation"][0].get<float>(), child["translation"][1].get<float>()};
+        layout.pivot = {child["pivot"][0].get<float>(), child["pivot"][1].get<float>()};
+
+        app.color = {
+            child["color"][0].get<float>(), child["color"][1].get<float>(),
+            child["color"][2].get<float>(), child["color"][3].get<float>()
+        };
+        app.atlasDir = child["directory"].get<std::string>();
+        app.atlasName = child["atlas"].get<std::string>();
+
+        app.uvRect = {
+            child["uv rectangle"][0].get<float>(), child["uv rectangle"][1].get<float>(),
+            child["uv rectangle"][2].get<float>(), child["uv rectangle"][3].get<float>()
+        };
+        app.imageSize = {child["image size"][0].get<float>(), child["image size"][1].get<float>()};
+        app.texGroup = texGroup;
+
+        const auto& name = child["name"].get<std::string>();
+        const auto& tag = child["tag"].get<std::string>();
+        BlockPtr bk;
+
+        if (tag == "Image" || tag == "psd"){
+            app.passName = "image";
+            bk = ImageBlock::create(name, app.atlasDir, texGroup, app.atlasName);
+
+        }else if (tag == "Scale9"){
+            app.passName = "image";
+            bk = ScaleNineBlock::create(name, app.atlasDir, texGroup, app.atlasName);
+
+            auto ptr = dynamic_cast<ScaleNineBlock*>(bk.getObjectPtr());
+            ptr->getSplitLines() = {
+                child["split lines"][0].get<float>(), child["split lines"][1].get<float>(),
+                child["split lines"][2].get<float>(), child["split lines"][3].get<float>()
+            };
+
+        }else if (tag == "Text"){
+            app.passName = "font";
+
+            bk = TextBlock::create(
+                child["text"].get<std::string>(),
+                child["fontname"].get<std::string>(),
+                child["font size"].get<int>(),
+                (TextBlock::Alignment)child["alignment"].get<int>());
+
+        }else if (tag == "Button"){
+            std::vector<BlockPtr> stateBlocks;
+            const auto& states = child["state"];
+
+            for(const auto& st : states){
+                Block::Appearance stApp;
+
+                stApp.atlasDir = st["directory"].get<std::string>();
+                stApp.atlasName = st["atlas"].get<std::string>();
+                stApp.uvRect = {
+                    st["uv rectangle"][0].get<float>(), st["uv rectangle"][1].get<float>(),
+                    st["uv rectangle"][2].get<float>(), st["uv rectangle"][3].get<float>()
+                };
+                stApp.imageSize = {
+                    st["image size"][0].get<float>(), st["image size"][1].get<float>()
+                };
+
+                BlockPtr linesBk;
+                if (st.find("split lines") != st.end()){
+                    linesBk = ScaleNineBlock::create(name, stApp.atlasDir, texGroup, stApp.atlasName);
+                }else{
+                    linesBk = ImageBlock::create(name, stApp.atlasDir, texGroup, stApp.atlasName);
+                }
+                linesBk->setName(st["name"]);
+                linesBk->setTexRect(stApp.uvRect);
+                linesBk->setSize({st["size"][0].get<float>(), st["size"][1].get<float>()});
+                stateBlocks.push_back(linesBk);
+            }
+
+            const auto& label = child["label"];
+            const auto& color = child["label"]["color"];
+
+            auto labelBk = TextBlock::create(
+                label["text"].get<std::string>(),
+                label["fontname"].get<std::string>(),
+                label["font size"].get<int>(),
+                (TextBlock::Alignment)label["alignment"].get<int>());
+
+            labelBk->setColor({
+                color[0].get<uint8_t>(), color[1].get<uint8_t>(),
+                color[2].get<uint8_t>(), color[3].get<uint8_t>()
+            });
+
+            bk = ButtonBlock::create(name, labelBk, stateBlocks,
+                child["state index"].get<int>());
+
+        }else if (tag == "Color"){
+            bk = ColorBlock::create(name);
+        }else{
+            bk = Block::create(name);
+        }
+        if (bk){
+            bk->setLayout(layout);
+            bk->setAppearance(app);
+            bk->lock(child["lock"].get<bool>());
+            bk->setVisible(child["visible"].get<bool>());
+            rootBlock->addChild(bk);
+        }
+    }
+    return rootBlock;
+}
+
+static void createBlocksFromPsdNode(const std::string& filename,
+    LayerGroup* parent, const tow::SamplerParamPtr& sp,
+    const tow::TextureGroupPtr& texGroup, std::vector<BlockPtr>& blocks){
+
+    for(auto child = parent->first_child(); child != nullptr; child = parent->next_child()){
+        if (child->is_group()){
+            auto group = dynamic_cast<LayerGroup*>(child);
+            if (group->children_count()){
+                createBlocksFromPsdNode(filename, group, sp, texGroup, blocks);
+            }
+        }else{
+            auto layer = dynamic_cast<Layer*>(child);
+            auto width = layer->width();
+            auto height = layer->height();
+
+            if (width == 0 || height == 0){
+                return;
+            }
+
+            std::string layerName;
+            strFormat(layerName, "layer_%u", blocks.size());
+
+            std::string atlasName;
+            strFormat(atlasName, "%s_%s.png", filename.c_str(), layerName.c_str());
+
+            texGroup->create2D(atlasName, {GL_TEXTURE_2D, 1, GL_RGBA8, sp, width, height});
+            texGroup->write2D(atlasName, {layer->get_image_data()}, {GL_BGRA});
+
+            auto bk = ImageBlock::create(layerName, UiEditor::s_psdLayerDirectory, texGroup, atlasName);
+            bk->setTag("psd");
+            bk->setTexRect({0, 0, width, height});
+            bk->setPivot({0, 1});
+            bk->setTexRect({0, height, width, -height});
+            bk->translate({layer->x(), layer->y()});
+            blocks.push_back(bk);
+        }
+    }
+}
+
+static BlockPtr createBlockFromPsd(const std::string& path){
+    PsdParser pp(path.c_str());
+    auto doc = pp.parse();
+    assert(doc);
+
+    std::vector<BlockPtr> blocks;
+    auto sp = tow::SamplerParam::create();
+    auto psdTexGroup = tow::TexGroup::create();
+
+    std::string filename = getSubstr(path, {"-\\", "-/"});
+    filename = filename.substr(0, filename.size() - 4); // remove the suffix '.psd'
+
+    createBlocksFromPsdNode(filename, doc, sp, psdTexGroup, blocks);
+
+    std::reverse(blocks.begin(), blocks.end());
+
+    auto rootBlock = Block::create("Root");
+    rootBlock->setTag("psd");
+    rootBlock->setTexGroup(psdTexGroup);
+    rootBlock->setSize({doc->width(), doc->height()});
+
+    auto localMat =
+        glm::translate(mat3(1), vec2{0, doc->height()}) *
+        glm::scale(mat3(1), {1, -1});
+
+    for(const auto& bk : blocks){
+        bk->translate(vec2(localMat * vec3(bk->getLayout().translation, 1)));
+        rootBlock->addChild(bk);
+    }
+
+    return rootBlock;
+}
+
+//-------------------------
+// write blocks to json
+static void writeBlocksToJson(const BlockPtr& rootBlock, const std::string& path){
+    using ordered_json = nlohmann::ordered_json;
+    ordered_json  j;
+
+    // root block
+    auto& root = j["root"];
+    auto& rootLayout = rootBlock->getLayout();
+    root["tag"] = rootBlock->getTag();
+    root["size"] = {rootLayout.size.x, rootLayout.size.y};
+
+    // child blocks
+    auto& children = j["children"];
+    for(const auto& bk : rootBlock->getChildren()){
+        auto& layout = bk->getLayout();
+        auto& app = bk->getAppearance();
+        const auto& tag = bk->getTag();
+
+        ordered_json child;
+
+        child["name"] = bk->getName();
+        child["tag"] = tag;
+        child["size"] = {layout.size.x, layout.size.y};
+        child["scale"] = {layout.scale.x, layout.scale.y};
+        child["rotation"] = layout.rotation;
+        child["translation"] = {layout.translation.x, layout.translation.y};
+        child["pivot"] = {layout.pivot.x, layout.pivot.y};
+        child["color"] = {app.color.x, app.color.y, app.color.z, app.color.w};
+        child["directory"] = app.atlasDir;
+        child["atlas"] = app.atlasName;
+        child["uv rectangle"] = {app.uvRect.x, app.uvRect.y, app.uvRect.z, app.uvRect.w};
+        child["image size"] = {app.imageSize.x, app.imageSize.y};
+
+        // extra information
+        child["visible"] = bk->isVisible();
+        child["lock"] = bk->isLocked();
+
+        if (tag == "Text"){
+            auto ptr = dynamic_cast<TextBlock*>(bk.getObjectPtr());
+            child["text"] = ptr->getText();
+            child["fontname"] = ptr->getFontname();
+            child["font size"] = ptr->getFontSize();
+            child["alignment"] = (int)ptr->getAlignment();
+        }else if (tag == "Scale9"){
+            auto ptr = dynamic_cast<ScaleNineBlock*>(bk.getObjectPtr());
+            const auto& sp = ptr->getSplitLines();
+            child["split lines"] = {sp.x, sp.y, sp.z, sp.w};
+        }else if (tag == "Button"){
+            auto ptr = dynamic_cast<ButtonBlock*>(bk.getObjectPtr());
+
+            ordered_json stJson;
+            for(const auto& stBlock : ptr->getStateBlocks()){
+                const auto& stApp = stBlock->getAppearance();
+                const auto& stLayout = stBlock->getLayout();
+
+                ordered_json stBlockJson;
+                stBlockJson["name"] = stBlock->getName();
+                stBlockJson["directory"] = stApp.atlasDir;
+                stBlockJson["atlas"] = stApp.atlasName;
+                stBlockJson["uv rectangle"] = {stApp.uvRect.x, stApp.uvRect.y, stApp.uvRect.z, stApp.uvRect.w};
+                stBlockJson["image size"] = {stApp.imageSize.x, stApp.imageSize.y};
+                if (stBlock->getTag() == "Scale9"){
+                    auto snPtr = dynamic_cast<ScaleNineBlock*>(stBlock.getObjectPtr());
+                    const auto& sp = snPtr->getSplitLines();
+                    stBlockJson["split lines"] = {sp.x, sp.y, sp.z, sp.w};
+                }
+                stBlockJson["size"] = {stLayout.size.x, stLayout.size.y};
+                stJson.push_back(stBlockJson);
+            }
+            child["state"] = stJson;
+            child["state index"] = ptr->getCurStateIndex();
+
+            auto labelBk = ptr->getLabelBlock();
+            auto labelPtr = dynamic_cast<TextBlock*>(labelBk.getObjectPtr());
+            const auto& color = labelPtr->getAppearance().color;
+
+            auto& label = child["label"];
+            label["text"] = labelPtr->getText();
+            label["fontname"] = labelPtr->getFontname();
+            label["font size"] = labelPtr->getFontSize();
+            label["alignment"] = (int)labelPtr->getAlignment();
+            label["color"] = {color.x, color.y, color.z, color.w};
+        }
+
+        children.push_back(child);
+    }
+
+    std::ofstream o(path);
+    o << std::setw(4) << j << std::endl;
+}
+
+//---------------------
+// input text
+static bool showInputText(std::string& text, int flags, size_t bufSize){
+    assert(text.size() < bufSize);
+
+    flags = flags | ImGuiInputTextFlags_CallbackAlways;
+
+    auto cb = [](ImGuiInputTextCallbackData *data)->int{
+        *(size_t*)data->UserData = data->BufTextLen;
+        return 1;
+    };
+
+    size_t textLength{0};
+    std::vector<char> buf(bufSize, 0);
+
+    memcpy(&buf[0], &text[0], text.size());
+    if (InputText("", &buf[0], buf.size(), flags, cb, &textLength)){
+        text = {&buf[0], textLength};
+        return true;
+    }else{
+        return false;
+    }
+}
+
+static bool showInputText(std::string& text, int flags){
+    return showInputText(text, flags, UiEditor::s_maxInputTextLength);
+}
+
+static bool showInputText(std::string& text){
+    return showInputText(text, ImGuiInputTextFlags_AutoSelectAll);
+}
+
+---
+
+--- block
+//----------------------------
+// block
+class Block;
+using BlockPtr = tow::ResourcePtr<Block>;
+
+class Block{
+public:
+    struct Vertex{
+        glm::vec2 position{0.0f};
+        glm::vec2 texCoord{0.0f};
+        glm::u8vec4 color{255};
+    };
+    using IndexType = GLushort;
+
+    struct BoundingBox{
+        bool isIn(const glm::vec2& pt) const;
+        bool isHalfIn(const glm::vec2& pt) const;
+
+        glm::vec2 o{0.0f}, u{0.0f}, v{0.0f};
+    };
+
+    struct Layout{
+        glm::vec2 pivot{0.0f};
+        glm::vec2 size{0.0f};
+
+        glm::vec2 scale{1.0f};
+        float rotation{0.0f};
+        glm::vec2 translation{0.0f};
+
+        glm::mat3 srtMat{1.0f};
+    };
+
+    struct Appearance{
+        glm::u8vec4 color{255};
+        std::string atlasDir;
+        std::string atlasName;
+        glm::vec4 uvRect{0, 0, 1, 1};
+        glm::vec2 imageSize{1};
+        int mode{GL_TRIANGLES};
+        std::string passName{"color"};
+        tow::TextureGroupPtr texGroup;
+    };
+
+protected:
+    Block(const std::string& n) : name(n) { uid = s_blockCount++; }
+public:
+    virtual ~Block(){}
+public:
+    static BlockPtr create(const std::string& n = "");
+
+public:
+    virtual void draw(const RendererPtr& r);
+    virtual BlockPtr copy(const std::string& n) const;
+    virtual void react(const RendererPtr& r, Solution::Pane& pane) const { (void)(r); (void)(pane); }
+    virtual int showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane);
+
+public:
+    // access methods
+    auto getUid() const { return uid; }
+    auto& getTag() { return tag; }
+    auto& getName() { return name; }
+    auto& getLayout() { return layout; }
+    auto& getAppearance() { return appearance; }
+    auto& getChildren() { return children; }
+    auto isVisible() const { return visible; }
+    auto isInvisible() const { return !visible; }
+    auto isLocked() const { return locked; }
+
+    // set layout attributes
+    void setLayout(const Layout& lay) { layout = lay; }
+    void setPivot(const glm::vec2& pivot) { layout.pivot = pivot; }
+    void setSize(const glm::vec2& size) { layout.size = size; }
+    void setMatrix(const glm::mat3& mat) { layout.srtMat = mat; }
+
+    // S R T
+    void scale(const glm::vec2& scale) { layout.scale = scale; }
+    void rotate(float rotation) { layout.rotation = rotation; }
+    void translate(const glm::vec2& trans) { layout.translation = trans; }
+
+    // set appearance attributes
+    void setAppearance(const Appearance& app) { appearance = app; }
+    void setColor(const glm::u8vec3& c) { appearance.color = {c, 255}; }
+    void setColor(const glm::u8vec4& c) { appearance.color = c; }
+    void setAtlasDir(const std::string& dir) { appearance.atlasDir = dir; }
+    void setAtlasName(const std::string& n) { appearance.atlasName = n; }
+    void setImageSize(const glm::vec2& sz) { appearance.imageSize = sz; }
+    void setTexRect(const glm::vec4& rect) { appearance.uvRect = rect; }
+    void setMode(int mode) { appearance.mode = mode; }
+    void setPassName(const std::string& n) { appearance.passName = n; }
+    void setTexGroup(const tow::TextureGroupPtr& group) { appearance.texGroup = group; }
+
+    // children
+    void setChildren(const std::vector<BlockPtr>& c) { children = c; }
+    void addChild(const BlockPtr& child) { children.push_back(child); }
+
+    // misc
+    void updateMatrix(const glm::mat3& parentMat);
+    void setName(const std::string& n) { name = n; }
+    void setTag(const std::string& t) { tag = t; }
+    void setVisible(bool vis) { visible = vis; }
+    void lock(bool lk) { locked = lk; }
+
+protected:
+    size_t uid{0};
+
+    std::string name;
+    std::string tag{"Block"};
+
+    bool visible{true};
+    bool locked{false};
+
+    Layout layout;
+    Appearance appearance;
+
+    std::vector<BlockPtr> children;
+
+    static size_t s_blockCount;
+};
+---
+
+--- block implemention
+//=====================================
+// block implemention
+
+//--------------------------------
+// bounding box implemention
+bool Block::BoundingBox::isIn(const glm::vec2& pt) const{
+    auto local = inverse(mat2(u, v)) * (pt - o);
+    return local.x >= 0 && local.x <= 1 && local.y >= 0 && local.y <= 1;
+}
+
+bool Block::BoundingBox::isHalfIn(const glm::vec2& pt) const{
+    auto local = inverse(mat2(u, v)) * (pt - o);
+    return local.x >= 0 && local.x <= 1 && local.y >= 0 && local.y <= 1
+        && (local.x + local.y) <= 1;
+}
+
+//---------------------
+// block implemention
+size_t Block::s_blockCount{1};
+
+BlockPtr Block::create(const std::string& n){
+    return BlockPtr(new Block(n));
+}
+
+void Block::draw(const RendererPtr& r){
+    auto& indices = r->getIndices();
+    auto& vertices = r->getVertices();
+
+    r->addDrawCmd(6, appearance);
+
+    // indices
+    auto num = (Block::IndexType)vertices.size();
+    Block::IndexType arr[] = {0, 1, 2, 2, 3, 0};
+    for(int i = 0; i < 6; ++i){
+        indices.push_back((Block::IndexType)(num + arr[i]));
+    }
+
+    // vertices
+    const auto& rect = appearance.uvRect;
+    const auto& imageSize = appearance.imageSize;
+    vec2 unit[] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+
+    for(int i = 0; i < 4; ++i){
+        vertices.push_back({vec2(layout.srtMat * vec3(unit[i] * layout.size, 1))});
+    }
+    for(size_t i = 0; i < 4; ++i){
+        auto& v = vertices.at(vertices.size() - 4 + i);
+        v.color = appearance.color;
+        v.texCoord = vec2(rect.x, rect.y) / imageSize + vec2(rect.z, rect.w) * unit[i] / imageSize;
+    }
+}
+
+void Block::updateMatrix(const glm::mat3& parentMat){
+    auto transform = [](Layout& layout, const mat3& parentMat){
+        layout.srtMat =
+        parentMat *
+        glm::translate(mat3(1), layout.translation) *
+        glm::rotate(mat3(1), radians(layout.rotation)) *
+        glm::scale(mat3(1), layout.scale) *
+        glm::translate(mat3(1), -layout.pivot * layout.size);
+    };
+
+    transform(layout, parentMat);
+
+    for(const auto& child : children){
+        transform(child->getLayout(), layout.srtMat);
+    }
+}
+
+int Block::showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane){
+    (void)(r); (void)(rootBlock); (void)(pane);
+
+    ImVec2 itemSize{0, GetFontSize() * 1.2f};
+    int ret{0};
+
+    PushStyleVar(ImGuiStyleVar_SelectableTextAlign, {0.3f, 0.5f});
+
+    if (Selectable("Copy", false, 0, itemSize)){
+        ret = 1;
+    }
+    if (Selectable(locked ? "Unlock" : "Lock", false, 0, itemSize)){
+        locked = !locked;
+    }
+    if (Selectable(visible ? "Hide" : "Show", false, 0, itemSize)){
+        visible = !visible;
+    }
+    if (Selectable("Delete", false, 0, itemSize)){
+        ret = 2;
+    }
+    if (Selectable("CopyEx", false, 0, itemSize)){
+        ret = 3;
+    }
+
+    PopStyleVar();
+
+    return ret;
+}
+
+BlockPtr Block::copy(const std::string& n) const{
+    auto bk = Block::create(n);
+    bk->setLayout(layout);
+    bk->setAppearance(appearance);
+    bk->setTag(tag);
+    return bk;
+}
+---
+
+--- color
+//-------------------------
+// color block
+class ColorBlock : public Block{
+private:
+    using Block::Block;
+public:
+    ~ColorBlock(){}
+
+public:
+    int showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane) override;
+    BlockPtr copy(const std::string& n) const override;
+
+public:
+    static BlockPtr create(const std::string& n);
+};
+---
+
+--- color implemention
+//------------------------
+// color implemention
+BlockPtr ColorBlock::create(const std::string& n){
+    auto bk = BlockPtr(new ColorBlock(n));
+    bk->setPassName("color");
+    bk->setTag("Color");
+    return bk;
+}
+
+int ColorBlock::showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane){
+    auto ret = Block::showMenuItems(r, rootBlock, pane);
+
+    Separator();
+
+    SetWidgetWidth(150);
+    PushID("Color");
+    WidgetWithLeftLabel("", [&]{
+        auto c = appearance.color;
+        auto param = vec4(c) / 255.0f;
+        ColorEdit4("", (float*)&param);
+        param *= 255.0f;
+        appearance.color = u8vec4(param);
+    });
+    PopID();
+    SetWidgetWidth(0);
+
+    return ret;
+}
+
+BlockPtr ColorBlock::copy(const std::string& n) const{
+    auto bk = ColorBlock::create(n);
+    bk->setLayout(layout);
+    bk->setAppearance(appearance);
+    bk->setTag(tag);
+    return bk;
+}
+---
+
+--- image
+//--------------------
+// image block
+class ImageBlock : public Block{
+private:
+    using Block::Block;
+public:
+    ~ImageBlock(){}
+public:
+    static BlockPtr create(const std::string& n, const std::string& dir,
+        const tow::TextureGroupPtr& texGroup, const std::string& atlasName);
+};
+---
+
+--- image implemention
+//----------------------------
+// image implemention
+BlockPtr ImageBlock::create(const std::string& n, const std::string& dir,
+    const tow::TextureGroupPtr& texGroup, const std::string& atlasName){
+
+    if (!texGroup->has(atlasName)){
+        ImageAsset()->loadImage8(
+            dir + atlasName, {texGroup, atlasName}, true);
+    }
+
+    const auto& st = texGroup->getStorage(atlasName);
+    auto bk = BlockPtr(new ImageBlock(n));
+    bk->setAtlasDir(dir);
+    bk->setAtlasName(atlasName);
+    bk->setTexGroup(texGroup);
+    bk->setSize({st.width, st.height});
+    bk->setTexRect({0, 0, st.width, st.height});
+    bk->setImageSize({st.width, st.height});
+    bk->setPassName("image");
+    bk->setTag("Image");
+    return bk;
+}
+---
+
+--- scale nine
+//--------------------
+// scale nine
+class ScaleNineBlock : public Block{
+private:
+    using Block::Block;
+public:
+    ~ScaleNineBlock(){}
+public:
+    static BlockPtr create(const std::string& n, const std::string& dir,
+        const tow::TextureGroupPtr& texGroup, const std::string& atlasName,
+        const glm::vec4& splitLines = glm::vec4{0.45f, 0.45f, 0.55f, 0.55f});
+
+public:
+    void draw(const RendererPtr& r) override;
+    int showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane) override;
+    BlockPtr copy(const std::string& n) const override;
+
+public:
+    auto& getSplitLines() { return splitLines; }
+
+private:
+    glm::vec4 splitLines;
+    glm::vec4 sliceScale{1.0f};
+    BlockPtr linesBlock;
+};
+---
+
+--- scale nine implemention
+//----------------------------
+// scale nine implemention
+BlockPtr ScaleNineBlock::create(const std::string& n, const std::string& dir,
+    const tow::TextureGroupPtr& texGroup, const std::string& atlasName,
+    const glm::vec4& splitLines){
+
+    ImageAsset()->loadImage8(dir + atlasName, {texGroup, atlasName}, true);
+    const auto& st = texGroup->getStorage(atlasName);
+
+    auto bk = new ScaleNineBlock(n);
+    bk->setAtlasDir(dir);
+    bk->setAtlasName(atlasName);
+    bk->setPassName("image");
+    bk->setTag("Scale9");
+    bk->setTexGroup(texGroup);
+    bk->setImageSize({st.width, st.height});
+    bk->splitLines = splitLines;
+
+    auto linesBlock = GeometryBlock::create("split line", {}, {});
+    linesBlock->setMode(GL_LINES);
+    linesBlock->setColor(u8vec4(u8vec3(255) - u8vec3(bk->appearance.color), 180));
+    bk->linesBlock = linesBlock;
+
+    return BlockPtr(bk);
+}
+
+void ScaleNineBlock::draw(const RendererPtr& r){
+    auto& indices = r->getIndices();
+    auto& vertices = r->getVertices();
+
+    r->addDrawCmd(9 * 6, appearance);
+
+    auto num = (Block::IndexType)vertices.size();
+    for (int i = 0; i < 4; ++i){
+        Block::IndexType arr[] = {0, 1, 2, 2, 3, 0};
+        for(int j = 0; j < 6; ++j){
+            indices.push_back((Block::IndexType)(num + arr[j] + i * 4));
+        }
+    }
+    /*
+    15 14  11 10
+    12 13   8  9
+
+     3  2   7  6
+     0  1   4  5
+    */
+    Block::IndexType arr[][6] = {
+        {1, 4, 7, 7, 2, 1},
+        {7, 6, 9, 9, 8, 7},
+        {13, 8, 11, 11, 14, 13},
+        {3, 2, 13, 13, 12, 3},
+        {2, 7, 8, 8, 13, 2}
+    };
+    for(int i = 0; i < 5; ++i){
+        for(int j = 0; j < 6; ++j){
+            indices.push_back((Block::IndexType)(num + arr[i][j]));
+        }
+    }
+
+    const auto& app = appearance;
+    const auto& lines = splitLines;
+    const auto& scale = sliceScale;
+    const auto& imgSize = app.imageSize;
+    const auto& layoutSize = layout.size;
+
+    vec2 unit[] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    vec2 rectPos{app.uvRect.x / imgSize.x, app.uvRect.y / imgSize.y};
+    vec2 rectSize{app.uvRect.z / imgSize.x, app.uvRect.w / imgSize.y};
+    vec2 snSize{app.uvRect.z, app.uvRect.w};
+
+    for(int i = 0; i < 4; ++i){
+        auto sp = vec2(lines.x, lines.y);
+        auto ss = vec2(scale.x, scale.y);
+        auto pos = unit[i] * sp * snSize * ss + vec2(0) * layoutSize;
+        auto tc = (unit[i] * sp + vec2(0)) * rectSize + vec2(rectPos.x, rectPos.y);
+
+        vertices.push_back({vec2(layout.srtMat * vec3(pos, 1)), tc});
+    }
+    for(int i = 0; i < 4; ++i){
+        auto sp = vec2(1 - lines.z, lines.y);
+        auto ss = vec2(scale.z, scale.y);
+        auto pos = unit[i] * sp * snSize * ss + vec2(layoutSize.x - sp.x * snSize.x * ss.x, 0);
+        auto tc = (unit[i] * sp + vec2(lines.z, 0)) * rectSize + vec2(rectPos.x, rectPos.y);
+
+        vertices.push_back({vec2(layout.srtMat * vec3(pos, 1)), tc});
+    }
+    for(int i = 0; i < 4; ++i){
+        auto sp = vec2(1 - lines.z, 1 - lines.w);
+        auto ss = vec2(scale.z, scale.w);
+        auto pos = unit[i] * sp * snSize * ss + layoutSize - sp * snSize * ss;
+        auto tc = (unit[i] * sp + vec2(lines.z, lines.w)) * rectSize + vec2(rectPos.x, rectPos.y);
+
+        vertices.push_back({vec2(layout.srtMat * vec3(pos, 1)), tc});
+    }
+    for(int i = 0; i < 4; ++i){
+        auto sp = vec2(lines.x, 1 - lines.w);
+        auto ss = vec2(scale.x, scale.w);
+        auto pos = unit[i] * sp * snSize * ss + vec2(0, layoutSize.y - sp.y * snSize.y * ss.y);
+        auto tc = (unit[i] * sp + vec2(0, lines.w)) * rectSize + vec2(rectPos.x, rectPos.y);
+
+        vertices.push_back({vec2(layout.srtMat * vec3(pos, 1)), tc});
+    }
+
+    for(int i = 0; i < 16; ++i){
+        auto& v = vertices.at(vertices.size() - 16 + i);
+        v.color = appearance.color;
+    }
+}
+
+int ScaleNineBlock::showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane){
+    auto ret = Block::showMenuItems(r, rootBlock, pane);
+
+    Separator();
+
+    SetLabelWidth(40);
+    SetWidgetWidth(100);
+    WidgetWithLeftLabel("LB", [&]{
+        DragFloat2("", &splitLines.x, 0.01f, 0.0f, 1.0f, "%.2f");
+    });
+    WidgetWithLeftLabel("RT", [&]{
+        DragFloat2("", &splitLines.z, 0.01f, 0.0f, 1.0f, "%.2f");
+    });
+    // todo
+    #if 0
+    WidgetWithLeftLabel("LBS", [&]{
+        DragFloat2("", &sliceScale.x, 0.01f, 0.0f, FLT_MAX, "%.2f");
+    });
+    WidgetWithLeftLabel("RTS", [&]{
+        DragFloat2("", &sliceScale.z, 0.01f, 0.0f, FLT_MAX, "%.2f");
+    });
+    #endif
+    SetLabelWidth(0);
+    SetWidgetWidth(0);
+
+    std::vector<glm::vec2> points = {
+        layout.size * vec2(splitLines.x, 0),
+        layout.size * vec2(splitLines.x, 1),
+        layout.size * vec2(0, splitLines.y),
+        layout.size * vec2(1, splitLines.y),
+        layout.size * vec2(splitLines.z, 0),
+        layout.size * vec2(splitLines.z, 1),
+        layout.size * vec2(0, splitLines.w),
+        layout.size * vec2(1, splitLines.w),
+    };
+
+    std::vector<Block::IndexType> indices;
+    for(int i = 0; i < 8; ++i) { indices.push_back((Block::IndexType)i); }
+
+    auto ptr = (GeometryBlock*)(linesBlock.getObjectPtr());
+    ptr->getPoints() = std::move(points);
+    ptr->getIndices() = std::move(indices);
+    ptr->setMatrix(layout.srtMat);
+    ptr->draw(r);
+
+    return ret;
+}
+
+BlockPtr ScaleNineBlock::copy(const std::string& n) const{
+    const auto& app = appearance;
+    auto bk = ScaleNineBlock::create(n, app.atlasDir, app.texGroup, app.atlasName, splitLines);
+    bk->setLayout(layout);
+    bk->setAppearance(appearance);
+    bk->setTag(tag);
+    return bk;
+}
+---
+
+--- text
+//---------------------------
+// text block
+class TextBlock : public Block{
+public:
+    enum Alignment{
+        LeftUp = 0,
+        Center
+    };
+
+private:
+    using Block::Block;
+public:
+    ~TextBlock(){}
+public:
+    static BlockPtr create(const std::string& text,
+        const std::string& fontname, int fontSize, Alignment align = Alignment::LeftUp);
+
+public:
+    void draw(const RendererPtr& r) override;
+    void react(const RendererPtr& r, Solution::Pane& pane) const override;
+    int showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane) override;
+    BlockPtr copy(const std::string& n) const override;
+
+public:
+    auto& getFontname() { return fontname; }
+    auto& getFontSize() { return fontSize; }
+    auto& getText() { return text; }
+    auto& getAlignment() { return align; }
+
+    void createGlyphs();
+
+    void updateGlyphLayout();
+
+private:
+    std::string fontname;
+    int fontSize{0};
+    std::string text;
+
+    glm::vec2 lastSize{0};
+
+    std::vector<FontCache::Glyph> glyphs;
+    std::vector<BlockPtr> glyphBlocks;
+
+    static const size_t s_maxNameLength{15};
+
+    std::vector<char> textBuffer;
+    std::vector<char> fontnameBuffer;
+
+    Alignment align;
+};
+---
+
+--- text implemention
+//-----------------------------
+// text block implemention
+BlockPtr TextBlock::create(const std::string& text, const std::string& fontname, int fontSize
+    , TextBlock::Alignment align){
+
+    auto bk = new TextBlock(text);
+    bk->setTag("Text");
+    bk->fontname = fontname;
+    bk->fontSize = fontSize;
+    bk->text = text;
+    bk->textBuffer.resize(UiEditor::s_maxInputTextLength, 0);
+    bk->fontnameBuffer.resize(UiEditor::s_maxInputTextLength, 0);
+    bk->align = align;
+    bk->createGlyphs();
+    return BlockPtr(bk);
+}
+
+BlockPtr TextBlock::copy(const std::string& n) const{
+    auto bk = TextBlock::create(text, fontname, fontSize, align);
+    bk->setLayout(layout);
+    bk->setAppearance(appearance);
+    bk->setName(n);
+    bk->setTag(tag);
+    return bk;
+}
+
+int TextBlock::showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane){
+    auto ret = Block::showMenuItems(r, rootBlock, pane);
+
+    Separator();
+
+    SetLabelWidth(45);
+    SetWidgetWidth(160);
+
+    WidgetWithLeftLabel("Font", [this]{
+        if (showInputText(fontname, ImGuiInputTextFlags_EnterReturnsTrue)){
+            createGlyphs();
+        }
+    });
+    WidgetWithLeftLabel("Size", [this]{
+        if (DragInt("", &fontSize, 1, 1, 128)){
+            createGlyphs();
+        }
+    });
+    WidgetWithLeftLabel("Text", [this]{
+        if (showInputText(text)){
+            createGlyphs();
+            name = text;
+        }
+    });
+    WidgetWithLeftLabel("Color", [&]{
+        auto c = appearance.color;
+        auto param = vec4(c) / 255.0f;
+        ColorEdit4("", (float*)&param);
+        param *= 255.0f;
+        appearance.color = u8vec4(param);
+    });
+    SetLabelWidth(0);
+    SetWidgetWidth(0);
+
+    return ret;
+}
+
+void TextBlock::react(const RendererPtr& r, Solution::Pane& pane) const{
+    (void)(pane);
+
+    auto bk = createBlockFrame(layout, {0,0,0,255});
+    bk->draw(r);
+}
+
+void TextBlock::updateGlyphLayout(){
+    auto localMat =
+        glm::translate(mat3(1), vec2(0, fontSize)) *
+        glm::scale(mat3(1), vec2(1, -1));
+
+    float advance{0};
+    float lineWidth{0};
+    int lineCount{0};
+    vec2 textSize{0};
+    bool zeroSize = layout.size.x == 0 && layout.size.y == 0;
+    auto lineGap{0.0f};
+
+    for(size_t i = 0; i < glyphBlocks.size(); ++i){
+        auto& bk = glyphBlocks.at(i);
+        auto& glyph = glyphs.at(i);
+        auto worldPos = vec2(localMat * vec3(glyph.pos, 1));
+        auto trans = worldPos + vec2{advance, 0};
+
+        lineWidth = trans.x + glyph.size.x;
+
+        if (!zeroSize && lineWidth > layout.size.x){
+            trans.x -= advance;
+            advance = 0;
+            lineCount++;
+        }
+        trans.y -= lineCount * (fontSize + lineGap);
+        bk->translate(trans);
+
+        advance += glyph.advance;
+        lineGap = glyph.lineGap;
+
+        if (lineWidth > textSize.x) { textSize.x = lineWidth; }
+    }
+    textSize.y = (lineCount + 1) * (fontSize + lineGap) - lineGap;
+
+    if (zeroSize){
+        layout.size = {lineWidth, fontSize};
+    }else{
+        vec2 trans{0};
+        if (align == Alignment::LeftUp){
+            trans = {0, layout.size.y - fontSize};
+        }else if (align == Alignment::Center){
+            trans = {
+                layout.size.x * 0.5f - textSize.x * 0.5f,
+                layout.size.y * 0.5f - fontSize + textSize.y * 0.5f
+            };
+        }
+        for(const auto& bk : glyphBlocks){
+            bk->translate(bk->getLayout().translation + trans);
+        }
+    }
+    lastSize = layout.size;
+}
+
+void TextBlock::createGlyphs(){
+    glyphs.clear();
+    glyphBlocks.clear();
+
+    auto fontPath = UiEditor::s_fontDirectory + fontname;
+    for(auto ch : text){
+        const auto& glyph = FontAsset()->getGlyph(ch, fontPath, fontSize);
+
+        auto bk = Block::create();
+        bk->setPivot({0, 1});
+        bk->setSize(glyph.size);
+        bk->setTexGroup(glyph.texGroup);
+        bk->setAtlasName(glyph.texName);
+        bk->setTexRect(glyph.uvRect);
+        bk->setImageSize({FontCache::kTexWidth, FontCache::kTexHeight});
+        bk->setPassName("font");
+
+        glyphs.push_back(glyph);
+        glyphBlocks.push_back(bk);
+    }
+    updateGlyphLayout();
+}
+
+void TextBlock::draw(const RendererPtr& r){
+    if (layout.size != lastSize){
+        updateGlyphLayout();
+    }
+
+    for(const auto& bk : glyphBlocks){
+        bk->updateMatrix(layout.srtMat);
+        bk->getAppearance().color = appearance.color;
+        bk->draw(r);
+    }
+}
+---
+
+--- button
+//---------------------------
+// button block
+class ButtonBlock : public Block{
+private:
+    using Block::Block;
+public:
+    ~ButtonBlock(){}
+public:
+    static BlockPtr create(const std::string& n, const BlockPtr& labelBlock,
+        const std::vector<BlockPtr>& stBlocks, size_t curStateIndex = 0);
+
+private:
+    void draw(const RendererPtr& r) override;
+    int showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane) override;
+    BlockPtr copy(const std::string& n) const override;
+
+public:
+    const auto& getStateBlocks() const { return stateBlocks; }
+    const auto& getLabelBlock() const { return labelBlock; }
+    const auto& getCurStateBlock() const { return stateBlocks.at(curStateIndex); }
+    auto getCurStateIndex() const { return curStateIndex; }
+
+private:
+    BlockPtr labelBlock;
+    std::vector<BlockPtr> stateBlocks;
+    size_t curStateIndex{0};
+    glm::vec2 lastSize{0};
+};
+---
+
+--- button implemention
+//-------------------------
+// button implemention
+BlockPtr ButtonBlock::create(const std::string& n, const BlockPtr& labelBlock,
+    const std::vector<BlockPtr>& stBlocks, size_t curStateIndex){
+
+    assert(!stBlocks.empty());
+
+    auto bk = new ButtonBlock(n);
+    bk->setSize(stBlocks.at(0)->getLayout().size);
+    bk->setTag("Button");
+    bk->stateBlocks = stBlocks;
+    bk->labelBlock = labelBlock;
+    bk->curStateIndex = curStateIndex;
+    return BlockPtr(bk);
+}
+
+void ButtonBlock::draw(const RendererPtr& r){
+    const auto& curBlock = stateBlocks.at(curStateIndex);
+
+    curBlock->setSize(layout.size);
+    curBlock->setMatrix(layout.srtMat);
+    curBlock->draw(r);
+
+    if (lastSize != layout.size){
+        labelBlock->setSize(layout.size);
+
+    }
+    labelBlock->setMatrix(layout.srtMat);
+    labelBlock->draw(r);
+}
+
+BlockPtr ButtonBlock::copy(const std::string& n) const{
+    auto textBk = labelBlock->copy(labelBlock->getName());
+
+    std::vector<BlockPtr> stBlocks;
+    for(const auto& stBlock : stateBlocks){
+        stBlocks.push_back(stBlock->copy(stBlock->getName()));
+    }
+    auto bk = ButtonBlock::create(n, textBk, stBlocks, curStateIndex);
+    bk->setLayout(layout);
+    bk->setAppearance(appearance);
+
+    return bk;
+}
+
+int ButtonBlock::showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, Solution::Pane& pane){
+    auto ret = Block::showMenuItems(r, rootBlock, pane);
+
+    SetLabelWidth(44);
+    SetWidgetWidth(150);
+
+    Separator();
+
+    auto labelPtr = dynamic_cast<TextBlock*>(labelBlock.getObjectPtr());
+    WidgetWithLeftLabel("Font", [=]{
+        if (showInputText(labelPtr->getFontname(), ImGuiInputTextFlags_EnterReturnsTrue)){
+            labelPtr->createGlyphs();
+        }
+    });
+    WidgetWithLeftLabel("Size", [=]{
+        if (DragInt("", &labelPtr->getFontSize(), 1, 1, 128)){
+            labelPtr->createGlyphs();
+        }
+    });
+    WidgetWithLeftLabel("Text", [=]{
+        if (showInputText(labelPtr->getText())){
+            labelPtr->createGlyphs();
+        }
+    });
+    WidgetWithLeftLabel("Color", [=]{
+        auto& app = labelPtr->getAppearance();
+        auto c = app.color;
+        auto param = vec4(c) / 255.0f;
+        ColorEdit4("", (float*)&param);
+        param *= 255.0f;
+        app.color = u8vec4(param);
+    });
+
+    Separator();
+
+    WidgetWithLeftLabel("State", [&]{
+        if (BeginCombo("##model filename", getCurStateBlock()->getName().c_str())){
+            for(size_t i = 0; i < stateBlocks.size(); ++i){
+                if (Selectable(stateBlocks[i]->getName().c_str())){
+                    curStateIndex = i;
+                }
+            }
+            EndCombo();
+        }
+    });
+    auto& bk = getCurStateBlock();
+    auto& app = bk->getAppearance();
+    auto& texGroup = app.texGroup;
+
+    WidgetWithLeftLabel("Atlas", [&]{
+        PushStyleColor(ImGuiCol_Text,
+            (texGroup && texGroup->has(app.atlasName)) ? GetStyleColorVec4(ImGuiCol_Text) : ImVec4(1, 0.5f, 0.5f, 1.0f));
+
+        if (showInputText(app.atlasName)){
+            if (texGroup){
+                ImageAsset()->loadImage8(app.atlasName, {texGroup, app.atlasName}, true);
+                if (texGroup->has(app.atlasName)){
+                    const auto& st = texGroup->getStorage(app.atlasName);
+                    bk->setImageSize({st.width, st.height});
+                }
+            }
+        }
+        PopStyleColor();
+    });
+
+    WidgetWithLeftLabel("UV", [&]{
+        return DragFloat2("", (float*)&app.uvRect, 0.1f, 0, 0, "%.1f");
+    });
+    WidgetWithLeftLabel("", [&]{
+        return DragFloat2("", (float*)&app.uvRect.z, 0.1f, 0, 0, "%.1f");
+    });
+
+    if (bk->getTag() == "Scale9"){
+        auto snPtr = dynamic_cast<ScaleNineBlock*>(bk.getObjectPtr());
+        auto& splitLines = snPtr->getSplitLines();
+        auto& snLayout = snPtr->getLayout();
+
+        Separator();
+
+        WidgetWithLeftLabel("LB", [&]{
+            DragFloat2("", &splitLines.x, 0.01f, 0.0f, 1.0f, "%.2f");
+        });
+        WidgetWithLeftLabel("RT", [&]{
+            DragFloat2("", &splitLines.z, 0.01f, 0.0f, 1.0f, "%.2f");
+        });
+
+        std::vector<glm::vec2> points = {
+            snLayout.size * vec2(splitLines.x, 0),
+            snLayout.size * vec2(splitLines.x, 1),
+            snLayout.size * vec2(0, splitLines.y),
+            snLayout.size * vec2(1, splitLines.y),
+            snLayout.size * vec2(splitLines.z, 0),
+            snLayout.size * vec2(splitLines.z, 1),
+            snLayout.size * vec2(0, splitLines.w),
+            snLayout.size * vec2(1, splitLines.w),
+        };
+
+        std::vector<Block::IndexType> indices;
+        for(int i = 0; i < 8; ++i) { indices.push_back((Block::IndexType)i); }
+
+        auto linesBlock = GeometryBlock::create("Lines", std::move(points), std::move(indices));
+        linesBlock->setMode(GL_LINES);
+        linesBlock->setColor(u8vec4(u8vec3(255) - u8vec3(appearance.color), 180));
+        linesBlock->setMatrix(snLayout.srtMat);
+        linesBlock->draw(r);
+    }
+
+    SetLabelWidth(0);
+    SetWidgetWidth(0);
+
+    return ret;
+}
+---
+
+--- geometry
+//-----------------------
+// geometry
+class GeometryBlock : public Block{
+private:
+    using Block::Block;
+public:
+    ~GeometryBlock(){}
+public:
+    static BlockPtr create(const std::string& n,
+        std::vector<glm::vec2>&& points, std::vector<IndexType>&& indices);
+
+public:
+    void draw(const RendererPtr& r) override;
+
+public:
+    auto& getPoints() { return geoPoints; }
+    auto& getIndices() { return geoIndices; }
+
+private:
+    std::vector<glm::vec2> geoPoints;
+    std::vector<IndexType> geoIndices;
+};
+---
+
+--- geometry implemention
+//--------------------------
+// geometry implemention
+BlockPtr GeometryBlock::create(const std::string& n, std::vector<glm::vec2>&& points,
+    std::vector<IndexType>&& indices){
+
+    auto ptr = new GeometryBlock(n);
+    ptr->geoPoints = std::move(points);
+    ptr->geoIndices = std::move(indices);
+    return BlockPtr(ptr);
+}
+
+void GeometryBlock::draw(const RendererPtr& r){
+    auto& indices = r->getIndices();
+    auto& vertices = r->getVertices();
+
+    r->addDrawCmd(geoIndices.size(), appearance);
+
+    auto num = (Block::IndexType)vertices.size();
+    for(size_t i = 0; i < geoIndices.size(); ++i){
+        indices.push_back(num + geoIndices[i]);
+    }
+
+    for(const auto& pt : geoPoints){
+        vertices.push_back({vec2(layout.srtMat * vec3(pt, 1))});
+    }
+
+    for(size_t i = 0; i < geoPoints.size(); ++i){
+        auto& v = vertices.at(vertices.size() - geoPoints.size() + i);
+        v.color = appearance.color;
+    }
+}
+---
+
+--- renderer
+//----------------------
+// renderer
+class Renderer{
+public:
+    struct DrawCommand{
+        size_t startIndex{0};
+        size_t indexCount{0};
+        std::string atlasName;
+        std::string passName;
+        int mode{0};
+        size_t hash{0};
+        tow::TextureGroupPtr texGroup;
+    };
+
+private:
+    Renderer(){}
+public:
+    ~Renderer(){}
+public:
+    static RendererPtr create();
+
+public:
+    void render(const Solution::Pane& pane);
+
+public:
+    auto& getIndices() { return indices; }
+    auto& getVertices() { return vertices; }
+    const auto& getPipeline() const { return pipeline; }
+    const auto& getBufferGroup() const { return pipeline->getBufferGroup(); }
+    const auto& getProgram() const{ return pipeline->getProgram(); }
+    const auto& getDrawCmds() const { return drawCmds; }
+
+public:
+    void addDrawCmd(size_t count, const Block::Appearance& app);
+
+private:
+    tow::DynamicArray<Block::Vertex> vertices;
+    tow::DynamicArray<Block::IndexType> indices;
+
+    tow::GraphicPipelinePtr pipeline;
+    tow::FramebufferPtr defaultFb;
+
+    tow::DynamicArray<DrawCommand> drawCmds;
+};
+---
+
+--- renderer implemention
+//===============================
+// renderer implemention
+RendererPtr Renderer::create(){
+    auto r = RendererPtr(new Renderer());
+
+    auto bufGroup = tow::BufferGroup::create();
+    bufGroup->createBuffer("b_vertex", nullptr, {GL_ARRAY_BUFFER, sizeof(Block::Vertex), 1, GL_STATIC_DRAW});
+    bufGroup->createBuffer("b_index", nullptr, {GL_ELEMENT_ARRAY_BUFFER, sizeof(Block::IndexType), 1, GL_STATIC_DRAW});
+
+    auto layout = tow::VertexLayout::create();
+    layout->add("a_position", {GL_FLOAT, 2, false, offsetof(Block::Vertex, position)});
+    layout->add("a_texCoord", {GL_FLOAT, 2, false, offsetof(Block::Vertex, texCoord)});
+    layout->add("a_color", {GL_UNSIGNED_BYTE, 4, true, offsetof(Block::Vertex, color)});
+    layout->stride(sizeof(Block::Vertex));
+
+    r->pipeline = tow::GraphicPipeline::create({bufGroup, "b_vertex", "b_index"}, layout,
+        {"assets/shaders/ui_editor.vert", "assets/shaders/ui_editor.frag"});
+
+    r->defaultFb = tow::Framebuffer::create();
+
+    return r;
+}
+
+void Renderer::render(const Solution::Pane& pane){
+    const auto& prog = pipeline->getProgram();
+    const auto& window = pane.window;
+
+    //---------------------
+    // fill buffers
+    const auto& bufGroup = pipeline->getBufferGroup();
+
+    bufGroup->createBuffer("b_vertex", vertices.data(),
+        {GL_ARRAY_BUFFER, sizeof(Block::Vertex), vertices.size(), GL_STATIC_DRAW});
+
+    bufGroup->createBuffer("b_index", indices.data(),
+        {GL_ELEMENT_ARRAY_BUFFER, sizeof(Block::IndexType), indices.size(), GL_STATIC_DRAW});
+
+    //---------------------
+    // set PV matrix
+    auto pvMat =
+        translate(mat3(1), vec2(-1)) *
+        scale(mat3(1), vec2(2) / vec2(window.size.x, window.size.y)) *
+        translate(mat3(1), vec2(window.size.x, window.size.y) * 0.5f);
+
+    prog->setUniformf("u_pvMat", {&pvMat, 9});
+
+    //------------------
+    // drawing
+    defaultFb->bindRect(window.getRect());
+
+    // set gl states
+    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
+
+    // draw elements
+     for(size_t i = 0; i < drawCmds.size(); ++i){
+        const auto& cmd = drawCmds.at(i);
+
+        prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass", cmd.passName.c_str());
+
+        if (cmd.texGroup && cmd.texGroup->has(cmd.atlasName)){
+            prog->setSampler(cmd.texGroup, cmd.atlasName, "s_tex");
+        }
+
+        tow::drawElements(pipeline, cmd.mode, cmd.startIndex, cmd.indexCount);
+    }
+
+    // clear data for next drawing
+    indices.clear();
+    vertices.clear();
+    drawCmds.clear();
+}
+
+void Renderer::addDrawCmd(size_t count, const Block::Appearance& app){
+    assert(count);
+
+    std::string str;
+    strFormat(str, "%s%s%d", app.atlasName.c_str(), app.passName.c_str(), app.mode);
+    auto hash = std::hash<std::string>()(str);
+
+    if (drawCmds.nonempty() && drawCmds.back().hash == hash && drawCmds.back().texGroup == app.texGroup){
+        drawCmds.back().indexCount += count;
+    }else{
+        drawCmds.push_back({indices.size(), count,
+            app.atlasName, app.passName, app.mode, hash, app.texGroup});
+    }
+}
+---
+
+--- ui editor
+//-----------------------
+// ui editor
+class UiEditor : public Solution::Project{
+public:
+    UiEditor(const std::string projName);
+
+private:
+    void setup() override;
+    void show(size_t cIndex, size_t pIndex) override;
+    void exit() override;
+
+private:
+    // show windows
+    void showBlock(const ImVec2& pos, Solution::Pane& pane);
+    void showLayers(const ImVec2& pos, Solution::Pane& pane);
+    void showParameter(const ImVec2& pos, Solution::Pane& pane);
+    void showBottomBar(Solution::Pane& pane);
+
+    // file block methods
+    const auto& getCurFileBlock() const { return fileBlockMap.at(curFilename); }
+    void setCurFileBlock(const std::string& filename, const BlockPtr& bk);
+    void setRootBlockAttrs(const BlockPtr& bk);
+    BlockPtr duplicateFileBlock(const std::string& filename);
+    void deleteBlock();
+
+    // misc
+    void showCopyEx();
+    void updateFileView(Solution::Pane& pane);
+    void handleDroppedFiles();
+
+public:
+    static const std::string s_fontDirectory;
+    static const std::string s_uiDirectory;
+    static const std::string s_jsonDirectory;
+    static const std::string s_psdLayerDirectory;
+    static const int s_maxCopyNum{20};
+    static const int s_maxInputTextLength{256};
+
+private:
+    std::string curFilename;
+    int curTabItemFlags{0};
+    std::map<std::string, BlockPtr> fileBlockMap;
+    std::map<std::string, bool> openFileTabMap;
+    std::string lastFilename;
+
+    BlockPtr selectedBlock;
+    BlockPtr triBlock;
+
+    RendererPtr renderer;
+
+    tow::TextureGroupPtr sharedTexGroup;
+
+    struct Config{
+        float bottomBarHeight{30.0f};
+        float triEdgeLength{20.0f};
+        ImVec2 layerPanelSize{250.0f, 200.0f};
+        size_t maxInputTextLength{256};
+        float parameterPanelHeight{410.0f};
+        ImVec2 layerItemSpacing{2.0f, 2.0f};
+        float blockPanelWidth{80.0f};
+        ImVec2 fileBlockSize{800.0f, 600.0f};
+
+        std::string fontname{"Roboto-Medium.ttf"};
+        std::string atlasName{"uipackSpace_sheet.png"};
+        std::string samplePath{"sample1.json"};
+    };
+    Config cfg;
+};
+---
+
+--- ui editor implemention
+//---------------------------
+// ui editor implemention
+
+const std::string UiEditor::s_fontDirectory{"assets/fonts/"};
+const std::string UiEditor::s_uiDirectory{"assets/ui/"};
+const std::string UiEditor::s_jsonDirectory{"assets/ui/"};
+const std::string UiEditor::s_psdLayerDirectory{"assets/ui/psd_layer/"};
+
+UiEditor::UiEditor(const std::string projName) : Solution::Project(projName) {
+    projLayout.setColumns({
+        {"Main Column", 1.0f, {{"Main View", 1.0f}}},
+    });
+    projLayout.setContraction({0, 0, 0, cfg.bottomBarHeight});
+}
+
+void UiEditor::exit(){
+    fileBlockMap.clear();
+    renderer = nullptr;
+    sharedTexGroup = nullptr;
+    openFileTabMap.clear();
+    lastFilename = "";
+}
+
+void UiEditor::setCurFileBlock(const std::string& filename, const BlockPtr& rootBlock){
+    fileBlockMap[filename] = rootBlock;
+    openFileTabMap[filename] = true;
+    lastFilename = "";
+}
+
+void UiEditor::setRootBlockAttrs(const BlockPtr& rootBlock){
+    rootBlock->setPivot({0.5f, 0.5f});
+    rootBlock->translate({-cfg.layerPanelSize.x * 0.5f, 0});
+    rootBlock->setPassName("grid");
+    rootBlock->lock(true);
+}
+
+void UiEditor::setup(){
+    renderer = Renderer::create();
+    sharedTexGroup = tow::TexGroup::create();
+
+    // create sample
+    auto sampleBlock = createBlockFromJson(s_jsonDirectory + cfg.samplePath, sharedTexGroup);
+    setRootBlockAttrs(sampleBlock);
+    setCurFileBlock(cfg.samplePath, sampleBlock);
+
+    triBlock = GeometryBlock::create("triangle", {}, {});
+    triBlock->setMode(GL_TRIANGLES);
+}
+
+void UiEditor::handleDroppedFiles(){
+    if (droppedFiles->empty()) { return; }
+
+    for(const auto& path : *droppedFiles){
+        auto suffix = getSuffix(path);
+        auto filename = getSubstr(path, {"-\\", "-/"});
+        if (suffix == "psd"){
+            auto rootBlock = createBlockFromPsd(path);
+            setRootBlockAttrs(rootBlock);
+            filename = filename.substr(0, filename.size() - 4);
+            setCurFileBlock(filename + ".json", rootBlock);
+
+        }else if(suffix == "json"){
+            auto rootBlock = createBlockFromJson(path, sharedTexGroup);
+            setRootBlockAttrs(rootBlock);
+            setCurFileBlock(filename, rootBlock);
+
+        }else if (suffix == "png" || suffix == "jpg"){
+            auto dir = path.substr(0, path.find(filename));
+            const auto& rootBlock = getCurFileBlock();
+            auto imgBlock = ImageBlock::create(filename, dir, sharedTexGroup, filename);
+            imgBlock->translate(rootBlock->getLayout().size * 0.5f);
+            imgBlock->setPivot({0.5f, 0.5f});
+            rootBlock->addChild(imgBlock);
+        }
+    }
+    droppedFiles->clear();
+}
+
+void UiEditor::showCopyEx(){
+    static ivec2 numParam{0};
+    static vec2 spacingParam{1};
+    static int copyCount{0};
+    const auto& rootBlock = getCurFileBlock();
+    auto& children = rootBlock->getChildren();
+
+    auto copyFunc = [&](){
+        int xnum = numParam.x + 1;
+        int ynum = numParam.y + 1;
+
+        for(int i = 0; i < copyCount; ++i){
+            children.pop_back();
+        }
+        copyCount = 0;
+
+        std::string name;
+        const auto& layout = selectedBlock->getLayout();
+        auto rotMat = glm::rotate(mat3(1), radians(layout.rotation));
+        for(int i = 0; i < xnum; ++i){
+            vec2 trans{i * (layout.size.x + spacingParam.x), 0};
+
+            for(int j = 0; j < ynum; ++j){
+                if (i == 0 && j == 0) { continue; }
+
+                trans.y = -j * (layout.size.y + spacingParam.y);
+
+                strFormat(name, "copy_%u", rootBlock->getChildren().size());
+                auto bk = selectedBlock->copy(name);
+                bk->translate(layout.translation + vec2(rotMat * vec3(trans, 0)));
+                bk->updateMatrix(rootBlock->getLayout().srtMat);
+                rootBlock->addChild(bk);
+
+                ++copyCount;
+            }
+        }
+    };
+    if (BeginPopup("CopyEx")){
+        SetWidgetWidth(100);
+        WidgetWithLeftLabel("Array Copy", [&]{
+            if (DragInt2("##num", (int*)&numParam, 1, 0, UiEditor::s_maxCopyNum)){
+                copyFunc();
+            }
+            SameLine();
+            if (DragFloat2("##spacing", (float*)&spacingParam, 0.1f, 0, 0, "%.1f")){
+                copyFunc();
+            }
+        });
+        SetWidgetWidth(0);
+
+        if (IsKeyDown(GLFW_KEY_ESCAPE)){
+            CloseCurrentPopup();
+        }
+
+        EndPopup();
+    }
+    if (!IsPopupOpen("CopyEx")) {
+        numParam = {0};
+        spacingParam = {1};
+        copyCount = 0;
+    }
+}
+
+void UiEditor::deleteBlock(){
+    const auto& rootBlock = getCurFileBlock();
+    auto& children = rootBlock->getChildren();
+
+    auto iter = std::find(children.begin(), children.end(), selectedBlock);
+    if (iter != children.end()){
+        auto index = (size_t)(iter - children.begin());
+        children.erase(iter);
+
+        if (index < children.size()){
+            selectedBlock = children.at(index);
+        }else if (!children.empty()){
+            selectedBlock = children.at(index - 1);
+        }else{
+            selectedBlock = rootBlock;
+        }
+    }
+}
+
+void UiEditor::updateFileView(Solution::Pane& pane){
+    auto& window = pane.window;
+    auto& input = pane.input;
+    auto& winSize = window.size;
+    auto& io = GetIO();
+
+    vec2 origin{window.pos.x, window.pos.y};
+    vec2 mousePos{input.x - winSize.x * 0.5f, input.y - winSize.y * 0.5f};
+    vec2 deltaPos{input.dx, -input.dy};
+    vec2 localPos = mousePos - origin;
+
+    const auto& rootBlock = getCurFileBlock();
+    auto& children = rootBlock->getChildren();
+
+    //---------------------------------------------
+    // test triangle whether can be dragged
+    static BlockPtr resizingBlock{nullptr};
+
+    if (window.focused && input.isMouseClicked[ImGuiMouseButton_Left]){
+        const auto& layout = selectedBlock->getLayout();
+        std::vector<vec2> triPoints;
+        vec2 unit[] = {{0, 0}, {1, 0}, {1, 1}};
+        for(int i = 0; i < 3; ++i){
+            triPoints.push_back(cfg.triEdgeLength * unit[i] + vec2{layout.size.x - cfg.triEdgeLength, 0});
+        }
+        Block::BoundingBox bbox;
+        bbox.o = vec2(layout.srtMat * vec3(triPoints.at(1), 1));
+        bbox.u = vec2(layout.srtMat * vec3(triPoints.at(0), 1)) - bbox.o;
+        bbox.v = vec2(layout.srtMat * vec3(triPoints.at(2), 1)) - bbox.o;
+        if (bbox.isHalfIn(localPos)){
+            resizingBlock = selectedBlock;
+        }
+    }
+    if (!input.isMouseDown[ImGuiMouseButton_Left]) { resizingBlock = nullptr; }
+
+    //---------------------
+    // block selection
+    if (!resizingBlock){
+        Block::BoundingBox bbox;
+        for(auto rIter = children.rbegin(); rIter != children.rend(); ++rIter){
+            auto& block = (*rIter);
+            const auto& layout = block->getLayout();
+
+            if (block->isInvisible()) { continue; }
+
+            bbox.o = vec2(layout.srtMat * vec3(0, 0, 1));
+            bbox.u = vec2(layout.srtMat * vec3(layout.size.x, 0, 1)) - bbox.o;
+            bbox.v = vec2(layout.srtMat * vec3(0, layout.size.y, 1)) - bbox.o;
+            if (!IsKeyDown(GLFW_KEY_SPACE) && window.focused &&
+                (window.justFocused || input.isMouseClicked[ImGuiMouseButton_Left]) &&
+                bbox.isIn(localPos))
+            {
+                selectedBlock = block;
+                break;
+            }
+        }
+    }
+
+    //------------------------
+    // right button menu
+    if (selectedBlock != rootBlock && input.isMouseClicked[ImGuiMouseButton_Right]){
+        OpenPopup("Block Menu");
+    }
+    auto ret{0};
+    if (BeginPopup("Block Menu")){
+        ret = selectedBlock->showMenuItems(renderer, rootBlock, pane);
+
+        if (IsKeyDown(GLFW_KEY_ESCAPE)){
+            CloseCurrentPopup();
+        }
+        EndPopup();
+    }
+    switch (ret){
+        case 1:
+        selectedBlock = copyBlock(selectedBlock, children.size());
+        rootBlock->addChild(selectedBlock); break;
+        case 2:
+        deleteBlock(); break;
+        case 3:
+        OpenPopup("CopyEx"); break;
+    }
+    showCopyEx();
+
+    //----------------------------
+    // blocks's own reaction
+    selectedBlock->react(renderer, pane);
+
+    //-------------------------------------
+    // a small triangle for resizing
+    if (selectedBlock->isVisible()){
+        const auto& layout = selectedBlock->getLayout();
+        const auto& app = selectedBlock->getAppearance();
+        std::vector<vec2> points;
+        std::vector<Block::IndexType> indices;
+        vec2 unit[] = {{0, 0}, {1, 0}, {1, 1}};
+        for(int i = 0; i < 3; ++i){
+            points.push_back(cfg.triEdgeLength * unit[i] + vec2{layout.size.x - cfg.triEdgeLength, 0});
+            indices.push_back((Block::IndexType)i);
+        }
+
+        auto ptr = (GeometryBlock*)(triBlock.getObjectPtr());
+        ptr->getPoints() = std::move(points);
+        ptr->getIndices() = std::move(indices);
+        ptr->setColor(u8vec4(u8vec3(255) - u8vec3(app.color), 180));
+        ptr->setMatrix(layout.srtMat);
+        ptr->draw(renderer);
+    }
+
+    //-------------------
+    // scale root block
+    if (io.KeyAlt && input.scrolly){
+        auto s = rootBlock->getLayout().scale + vec2(input.scrolly * 0.1f);
+        s.x = max(s.x, 0.1f);
+        s.y = max(s.y, 0.1f);
+        rootBlock->scale(s);
+    }
+
+    if (!window.focused) { return; }
+
+
+    //----------------------------
+    // move or resize block
+    if (input.isMouseDown[ImGuiMouseButton_Left]){
+        auto dtPos = deltaPos / rootBlock->getLayout().scale.x;
+
+        if (resizingBlock && !resizingBlock->isLocked()){
+            const auto& layout = resizingBlock->getLayout();
+
+            auto size = max(layout.size + dtPos * vec2(1, -1), vec2(1.0f));
+            resizingBlock->setSize(size);
+
+            auto rotMat = glm::rotate(mat3(1), radians(layout.rotation));
+            auto trans = vec2(rotMat * vec3(vec2(layout.pivot.x, (1 - layout.pivot.y)) * dtPos, 0));
+            resizingBlock->translate(layout.translation + trans);
+        }else{
+            if (IsKeyDown(GLFW_KEY_SPACE)){
+                rootBlock->translate(rootBlock->getLayout().translation + dtPos);
+            }else{
+                if (!selectedBlock->isLocked()){
+                    selectedBlock->translate(selectedBlock->getLayout().translation + dtPos);
+                }
+            }
+        }
+    }
+
+    //----------------------------
+    // shortkey's reactions
+    if (io.KeyCtrl){
+        if (IsKeyReleased(GLFW_KEY_D)){
+            selectedBlock = copyBlock(selectedBlock, children.size());
+            rootBlock->addChild(selectedBlock);
+        }else if (IsKeyReleased(GLFW_KEY_E)){
+            OpenPopup("CopyEx");
+        }
+    }else if (IsKeyPressed(GLFW_KEY_DELETE)){
+        deleteBlock();
+    }
+    if (!selectedBlock->isLocked()){
+        std::vector<vec2> offsets = {
+            {1, 0}, {-1, 0}, {0, -1}, {0, 1}
+        };
+        const auto& layout = selectedBlock->getLayout();
+        for (int i = GLFW_KEY_RIGHT; i <= GLFW_KEY_UP; ++i){
+            if (IsKeyReleased(i)){
+                selectedBlock->translate(layout.translation + offsets[i - GLFW_KEY_RIGHT]);
+            }
+        }
+    }
+}
+
+void UiEditor::showBlock(const ImVec2& ltPos, Solution::Pane& pane){
+    auto& window = pane.window;
+    auto winFlags = ImGuiWindowFlags_NoResize;
+
+    static ImVec2 localPos;
+    SetNextWindowPos(ltPos + localPos, window.sizeChanged ? ImGuiCond_Always : ImGuiCond_Once);
+    SetNextWindowSize({cfg.blockPanelWidth, 0});
+
+    if (Begin("Block", nullptr, winFlags)){
+        localPos = GetWindowPos() - ltPos;
+
+        const ImVec2 btnSize{GetWindowContentRegionWidth(), 0};
+        auto dir = UiEditor::s_uiDirectory + "uipack_space/";
+        BlockPtr newBlock;
+
+        if (Button("Color", btnSize)){
+            newBlock = ColorBlock::create("");
+            newBlock->setSize({100.0f, 100.0f});
+            newBlock->setColor(linearRand(ivec3(0), ivec3(255)));
+        }
+        if (Button("Image", btnSize)){
+            newBlock = ImageBlock::create("", dir, sharedTexGroup, cfg.atlasName);
+            newBlock->setSize({80.0f, 80.0f});
+            newBlock->setTexRect({300.0f, 220.0f, 80.0f, 80.0f});
+        }
+        if (Button("Scale9", btnSize)){
+            newBlock = ScaleNineBlock::create("", dir, sharedTexGroup, cfg.atlasName);
+            newBlock->setSize({100.0f, 100.0f});
+            newBlock->setTexRect({100.0f, 13.0f, 100.0f, 100.0f});
+        }
+        if (Button("Text", btnSize)){
+            newBlock = TextBlock::create("text", cfg.fontname, 24);
+            newBlock->setSize({100.0f, 50.0f});
+            newBlock->setColor({50, 50, 50});
+        }
+        if (Button("Button", btnSize)){
+            auto textBk = TextBlock::create("button", cfg.fontname, 24, TextBlock::Alignment::Center);
+            textBk->setColor({50, 50, 50});
+
+            auto normalBk = ScaleNineBlock::create("normal", dir, sharedTexGroup, cfg.atlasName,
+                {0.44f, 0.50f, 0.55f, 0.66f});
+
+            normalBk->setSize({100.0f, 45.0f});
+            normalBk->setTexRect({384.0f, 36.0f, 21.0f, 27.0f});
+
+            auto pressedBk = ScaleNineBlock::create("pressed", dir, sharedTexGroup, cfg.atlasName,
+                {0.44f, 0.50f, 0.55f, 0.66f});
+
+            pressedBk->setSize({100.0f, 45.0f});
+            pressedBk->setTexRect({384.0f, 92.0f, 21.0f, 27.0f});
+
+            auto disabledBk = ScaleNineBlock::create("disabled", dir, sharedTexGroup, cfg.atlasName,
+                {0.44f, 0.50f, 0.55f, 0.66f});
+
+            disabledBk->setSize({100.0f, 100.0f});
+            disabledBk->setTexRect({384.0f, 10.0f, 21.0f, 27.0f});
+
+            newBlock = ButtonBlock::create("button", textBk, {normalBk, pressedBk, disabledBk});
+        }
+        if (Button("Block", btnSize)){
+            newBlock = Block::create("");
+            newBlock->setSize({50.0f, 50.0f});
+            newBlock->setColor({255, 128, 128});
+        }
+        if (newBlock){
+            const auto& rootBlock = getCurFileBlock();
+            std::string name;
+            strFormat(name, "new_%u", rootBlock->getChildren().size());
+
+            newBlock->setName(name);
+            newBlock->translate(rootBlock->getLayout().size * 0.5f);
+            newBlock->setPivot({0.5f, 0.5f});
+            rootBlock->addChild(newBlock);
+
+            selectedBlock = newBlock;
+        }
+    }
+    End();
+}
+
+void UiEditor::showLayers(const ImVec2& rtPos, Solution::Pane& pane){
+    auto& window = pane.window;
+    auto winFlags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    auto& io = GetIO();
+    auto lastCfg = io.ConfigWindowsResizeFromEdges;
+
+    const auto& rootBlock = getCurFileBlock();
+    auto& children = rootBlock->getChildren();
+
+    static ImVec2 localPos;
+
+    SetNextWindowPos(rtPos + localPos, window.sizeChanged ? ImGuiCond_Always : ImGuiCond_Once, {1, 0});
+    SetNextWindowSize(cfg.layerPanelSize, ImGuiCond_Once);
+
+    io.ConfigWindowsResizeFromEdges = false;
+
+    if (Begin("Layers", nullptr, winFlags)){
+        localPos = GetWindowPos() + ImVec2(GetWindowWidth(), 0) - rtPos;
+
+        //----------------------
+        // layer list view
+        PushStyleVar(ImGuiStyleVar_ItemSpacing, cfg.layerItemSpacing);
+        BeginChild("Layer List", {0, GetContentRegionAvail().y - 15});
+        {
+            ImVec4 btnColor;
+            std::string btnStr;
+            ImVec4 inputTextColor;
+            size_t index{0};
+            size_t selectedIndex = (size_t)-1;
+            size_t targetIndex = (size_t)-1;
+            static BlockPtr visAloneBlock;
+            static BlockPtr unlockedAloneBlock;
+
+            for(auto rIter = children.rbegin(); rIter != children.rend(); ++rIter, ++index){
+                auto& bk = (*rIter);
+                auto& name = bk->getName();
+
+                btnColor = GetStyle().Colors[ImGuiCol_Button];
+                if(bk == selectedBlock) {
+                    btnColor = ImVec4(0.24f, 0.45f, 0.6f, 1.0f);
+                    selectedIndex = index;
+                }
+
+                PushStyleColor(ImGuiCol_Button, btnColor);
+                PushStyleColor(ImGuiCol_ButtonHovered, btnColor);
+                PushStyleColor(ImGuiCol_ButtonActive, btnColor);
+                BeginGroup();
+                    // visible button
+                    strFormat(btnStr, "%s##%u", bk->isVisible() ? ICON_FA_EYE : ICON_FA_EYE_SLASH, index);
+                    if (Button(btnStr.c_str())) {
+                        if (io.KeyAlt){
+                            bk->setVisible(true);
+                            for(const auto& child : children){
+                                if (child != bk) { child->setVisible(visAloneBlock == bk); }
+                            }
+                            visAloneBlock = visAloneBlock == bk ? nullptr : bk;
+                        }else{
+                            bk->setVisible(!bk->isVisible());
+                        }
+                    }
+                    // lock button
+                    SameLine();
+                    strFormat(btnStr, "%s##%u", bk->isLocked() ? ICON_FA_LOCK : ICON_FA_LOCK_OPEN, index);
+                    if (Button(btnStr.c_str())) {
+                        if (io.KeyAlt){
+                            bk->lock(false);
+                            for(const auto& child : children){
+                                if (child != bk) { child->lock(unlockedAloneBlock != bk); }
+                            }
+                            unlockedAloneBlock = unlockedAloneBlock == bk ? nullptr : bk;
+                        }else{
+                            bk->lock(!bk->isLocked());
+                        }
+                    }
+                    // layer name
+                    SameLine();
+                    BeginGroup();
+                        PushStyleColor(ImGuiCol_FrameBg, btnColor);
+                        PushStyleColor(ImGuiCol_FrameBgHovered, btnColor);
+                        PushStyleColor(ImGuiCol_FrameBgActive, btnColor);
+                        auto textSize = CalcTextSize(name.c_str());
+                        auto itemSize = GetStyle().FramePadding * 2.0f + textSize;
+
+                        SetNextItemWidth(GetWindowContentRegionWidth() * 0.5f);
+
+                        PushID(bk->getUid());
+                        showInputText(name);
+                        PopID();
+                        PopStyleColor(3);
+
+                        SameLine();
+
+                        //PushID(bk->getUid());
+                        auto p = GetCursorPos();
+                        p.x = p.x - cfg.layerItemSpacing.x - GetStyle().FrameRounding;
+                        SetCursorPos(p);
+                        Button("", {GetWindowContentRegionWidth() - p.x, GetItemRectSize().y});
+                        //PopID();
+                    EndGroup();
+
+                    if (IsItemClicked(0)){
+                        selectedBlock = bk;
+                    }
+                    // set drag target index
+                    if (IsMouseReleased(ImGuiMouseButton_Left) && !IsItemActive() && ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly)){
+                        targetIndex = index;
+                    }
+                EndGroup();
+
+                // show frame
+                if (IsMouseHoveringRect(GetItemRectMin(), GetItemRectMax()) || IsItemHovered()){
+                    auto frameBlock = createBlockFrame(bk->getLayout(), bk->getAppearance());
+                    frameBlock->draw(renderer);
+                }
+
+                PopStyleColor(3);
+            }
+
+            // change layer order
+            if (selectedIndex != targetIndex && targetIndex != -1){
+                auto num = children.size() - 1;
+                targetIndex = num - targetIndex;
+                selectedIndex = num - selectedIndex;
+
+                children.insert(children.begin() + targetIndex, selectedBlock);
+                if (targetIndex + 1 != selectedIndex){
+                    std::swap(children.at(targetIndex + 1), children.at(targetIndex));
+                }
+                auto iter = children.begin();
+                if (selectedIndex < targetIndex){
+                    children.erase(iter + selectedIndex);
+                }else{
+                    children.erase(iter + selectedIndex + 1);
+                }
+            }
+        }
+        EndChild();
+        PopStyleVar();
+    }
+    End();
+
+    io.ConfigWindowsResizeFromEdges = lastCfg;
+}
+
+void UiEditor::showParameter(const ImVec2& rtPos, Solution::Pane& pane){
+    auto& window = pane.window;
+    auto winFlags = 0;
+
+    static ImVec2 localPos;
+    SetNextWindowPos(rtPos + localPos, window.sizeChanged ? ImGuiCond_Always : ImGuiCond_Once, {1, 0});
+    SetNextWindowSize({cfg.layerPanelSize.x, cfg.parameterPanelHeight}, ImGuiCond_Once);
+
+    if (Begin("Parameter", nullptr, winFlags)){
+        localPos = GetWindowPos() + ImVec2(GetWindowWidth(), 0) - rtPos;
+
+        //--------------
+        // block state
+        bool vis = selectedBlock->isVisible();
+        bool locked = selectedBlock->isLocked();
+
+        if (Checkbox("Visible", &vis)) { selectedBlock->setVisible(vis); }
+        SameLine();
+        if (Checkbox("Locked", &locked)) { selectedBlock->lock(locked); }
+
+        //--------------
+        // parameter
+        BeginChild("Parameter Child", {0, 330}, true,
+            selectedBlock->isLocked() ? ImGuiWindowFlags_NoInputs : 0);
+
+        SetLabelWidth(70);
+
+        auto& layout = selectedBlock->getLayout();
+        auto& texGroup = selectedBlock->getAppearance().texGroup;
+        auto& app = selectedBlock->getAppearance();
+
+        //------------------
+        // tag
+        SetWidgetWidth(75);
+        WidgetWithLeftLabel("Tag", [&]{
+            showInputText(selectedBlock->getTag());
+        });
+
+        //=====================
+        // transform
+        Separator();
+        Text("Transform");
+
+        const float kWidgetWidth = 155;
+        SetWidgetWidth(kWidgetWidth);
+
+        //------------------
+        // size
+        static bool linkedSize{false};
+        auto sizeBtnStr = linkedSize ? ICON_FA_LINK : ICON_FA_UNLINK;
+
+        SetWidgetWidth(kWidgetWidth- GetFramedItemSize(sizeBtnStr).x -
+            GetStyle().ItemSpacing.x);
+        WidgetWithLeftLabel("Size", [&]{
+            auto lastSize = layout.size;
+            if (DragFloat2("", (float*)&layout.size, 1.0f, 1, FLT_MAX, "%.f")){
+                if (linkedSize){
+                    auto diff = layout.size - lastSize;
+                    layout.size = lastSize + vec2(diff.x + diff.y);
+                }
+            }
+        });
+        SetWidgetWidth(kWidgetWidth);
+        SameLine();
+        if (Button(sizeBtnStr)){ linkedSize = !linkedSize; }
+
+        //-----------------------------------------
+        // widgets that don't need link button
+        WidgetWithLeftLabel("Pivot", [&]{
+            DragFloat2("", (float*)&layout.pivot, 0.01f, 0, 0, "%.2f");
+        });
+        WidgetWithLeftLabel("Translate", [&]{
+            DragFloat2("", (float*)&layout.translation, 1.0f, 0, 0, "%.f");
+        });
+        WidgetWithLeftLabel("Rotate", [&]{
+            DragFloat("", &layout.rotation, 0.1f, 0, 0, "%.2f");
+        });
+
+        //-----------------
+        // scale
+        static bool linkedScale{true};
+        auto scaleBtnStr = linkedScale ? ICON_FA_LINK : ICON_FA_UNLINK;
+
+        SetWidgetWidth(kWidgetWidth - GetFramedItemSize(scaleBtnStr).x -
+            GetStyle().ItemSpacing.x);
+        WidgetWithLeftLabel("Scale", [&]{
+            auto lastScale = layout.scale;
+            if (DragFloat2("", (float*)&layout.scale, 0.01f, 0, 0, "%.2f")){
+                if (linkedScale){
+                    auto diff = layout.scale - lastScale;
+                    layout.scale = lastScale + vec2(diff.x + diff.y);
+                }
+            }
+        });
+        SetWidgetWidth(kWidgetWidth);
+        SameLine();
+        if (Button(scaleBtnStr)){ linkedScale = !linkedScale; }
+
+        //--------------------
+        // appearance
+        Separator();
+        Text("Appearance");
+
+        WidgetWithLeftLabel("Color", [&]{
+            auto c = app.color;
+            auto param = vec4(c) / 255.0f;
+            ColorEdit4("", (float*)&param);
+            param *= 255.0f;
+            app.color = u8vec4(param);
+        });
+
+        WidgetWithLeftLabel("Atlas", [&]{
+            PushStyleColor(ImGuiCol_Text,
+                (texGroup && texGroup->has(app.atlasName)) ? GetStyleColorVec4(ImGuiCol_Text) : ImVec4(1, 0.5f, 0.5f, 1.0f));
+
+            if (showInputText(app.atlasName)){
+                if (texGroup){
+                    ImageAsset()->loadImage8(
+                        app.atlasName, {texGroup, app.atlasName}, true);
+
+                    if (texGroup->has(app.atlasName)){
+                        const auto& st = texGroup->getStorage(app.atlasName);
+                        selectedBlock->setImageSize({st.width, st.height});
+                    }
+                }
+            }
+
+            PopStyleColor();
+        });
+
+        // texture coordinate rectangle
+        WidgetWithLeftLabel("UV", [&]{
+            return DragFloat2("", (float*)&app.uvRect, 1.0f, 0, 0, "%.f");
+        });
+        WidgetWithLeftLabel("", [&]{
+            return DragFloat2("", (float*)&app.uvRect.z, 1.0f, 0, 0, "%.f");
+        });
+
+        SetLabelWidth(0);
+        SetWidgetWidth(0);
+
+        EndChild();
+
+        Dummy({0, 10});// add extra space to look better
+    }
+    End();
+}
+
+BlockPtr UiEditor::duplicateFileBlock(const std::string& filename){
+    auto rootBlock = getCurFileBlock();
+    auto dup = rootBlock->copy(filename);
+    for(const auto& child : rootBlock->getChildren()){
+        dup->addChild(child->copy(child->getName()));
+    }
+    return dup;
+}
+
+void UiEditor::showBottomBar(Solution::Pane& pane){
+    auto& io = GetIO();
+    auto winFlags = ImGuiWindowFlags_NoTitleBar |
+                    ImGuiWindowFlags_NoResize |
+                    ImGuiWindowFlags_NoBringToFrontOnFocus |
+                    ImGuiWindowFlags_NoScrollbar;
+
+    auto winSize = io.DisplayFramebufferScale * io.DisplaySize;
+    SetNextWindowPos({0, winSize.y - cfg.bottomBarHeight});
+    SetNextWindowSize({winSize.x, cfg.bottomBarHeight});
+
+    static bool openHelpWindow{false};
+    Begin("Botom Bar", nullptr, winFlags);
+        SetCursorPos({GetStyle().WindowPadding.x, cfg.bottomBarHeight * 0.5f - GetFramedItemSize("Menu").y * 0.5f});
+
+        if (Button("Menu")){
+            OpenPopup("File Menu");
+
+            SetNextWindowPos(GetWindowPos(), ImGuiCond_Always, {0, 1});
+            SetNextWindowSize({180, 0});
+        }
+
+        static std::string newFilename;
+        static ImVec2 newFileBlockSize;
+        static std::string otherFilename;
+        static bool showSavedStatus{false};
+        bool openNewFileDialog{false};
+        bool openSaveAsDialog{false};
+
+        auto dupOperation = [&]{
+            if (!curFilename.empty()){
+                auto pos = curFilename.rfind(".json");
+                if (pos != std::string::npos){
+                    std::string filename;
+                    strFormat(filename, "%s_%u.json",
+                        curFilename.substr(0, pos).c_str(),
+                        fileBlockMap.size());
+
+                    auto bk = duplicateFileBlock(filename);
+                    setRootBlockAttrs(bk);
+                    setCurFileBlock(filename, bk);
+                }
+            }
+        };
+        auto saveOperation = [&]{
+            if (!curFilename.empty()){
+                auto rootBlock = getCurFileBlock();
+
+                if (rootBlock->getTag() == "psd"){
+                    for(const auto& child : rootBlock->getChildren()){
+                        auto& app = child->getAppearance();
+                        app.uvRect = {0, 0, app.uvRect.z, app.uvRect.y};
+                    }
+
+                    auto mgr = AssetManager::get();
+                    std::vector<uint8_t> pixels;
+                    auto psdTexGroup = rootBlock->getAppearance().texGroup;
+
+                    for(const auto& pr : psdTexGroup->getStorageMap()){
+                        const auto& name = pr.first;
+                        const auto& st = pr.second;
+
+                        pixels.resize(st.width * st.height * 4);
+
+                        psdTexGroup->read(name, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+                        ImageAsset()->writeImage(UiEditor::s_psdLayerDirectory + name, st.width, st.height,
+                            4, pixels.data());
+                    }
+                    psdTexGroup->clear();
+
+                    writeBlocksToJson(rootBlock, UiEditor::s_jsonDirectory + curFilename);
+
+                    rootBlock = createBlockFromJson(UiEditor::s_jsonDirectory + curFilename, psdTexGroup);
+                    setCurFileBlock(curFilename, rootBlock);
+                    setRootBlockAttrs(rootBlock);
+                }else{
+                    writeBlocksToJson(rootBlock, UiEditor::s_jsonDirectory + curFilename);
+                }
+
+                showSavedStatus = true;
+            }
+        };
+        auto saveAsOperation = [&]{
+            if (!curFilename.empty()){
+                OpenPopup("Save As...");
+                otherFilename = curFilename;
+            }
+        };
+        auto createOperation = [&]{
+            OpenPopup("New File...");
+            strFormat(newFilename, "new_file_%u.json", fileBlockMap.size());
+            newFileBlockSize = cfg.fileBlockSize;
+        };
+
+        if (BeginPopup("File Menu")){
+            if (MenuItem("New File...", "CTRL+N")){
+                openNewFileDialog = true;
+            }
+            if (MenuItem("Save", "CTRL+S")) {
+                saveOperation();
+            }
+            if (MenuItem("Save As...", "CTRL+SHIFT+S")) {
+                openSaveAsDialog = true;
+            }
+            if (MenuItem("Duplicate", "CTRL+U")) {
+                dupOperation();
+            }
+            if (MenuItem("Help", "F1")){
+                openHelpWindow = true;
+            }
+            EndPopup();
+        }
+        if (openNewFileDialog){
+            createOperation();
+        }
+        if (openSaveAsDialog){
+            saveAsOperation();
+        }
+        if (io.KeyCtrl){
+            if (io.KeyShift){
+                if(IsKeyReleased(GLFW_KEY_S)){
+                    if (!IsPopupOpen("Save As...")){
+                        saveAsOperation();
+                    }
+                }
+            }else if (IsKeyReleased(GLFW_KEY_N)){
+                if (!IsPopupOpen("New File...")){
+                    createOperation();
+                }
+            }else if(IsKeyReleased(GLFW_KEY_S)){
+                saveOperation();
+
+            }else if(IsKeyReleased(GLFW_KEY_U)){
+                dupOperation();
+            }
+        }else{
+            if(IsKeyReleased(GLFW_KEY_F1)){
+                openHelpWindow = !openHelpWindow;
+            }
+        }
+        if (BeginPopupModal("Save As...", nullptr, ImGuiWindowFlags_AlwaysAutoResize)){
+            SetLabelWidth(50);
+            SetWidgetWidth(200);
+            WidgetWithLeftLabel("Name", [&]{
+                showInputText(otherFilename);
+            });
+            SetLabelWidth(0);
+            SetWidgetWidth(0);
+
+            if (Button("OK", {120, 0}) || IsKeyDown(GLFW_KEY_ENTER)) {
+                if (otherFilename.rfind(".json") == std::string::npos) {
+                    otherFilename += ".json";
+                }
+                writeBlocksToJson(getCurFileBlock(), UiEditor::s_jsonDirectory + otherFilename);
+                showSavedStatus = true;
+
+                openFileTabMap.at(curFilename) = false;
+                setCurFileBlock(otherFilename, getCurFileBlock());
+
+                CloseCurrentPopup();
+            }
+            SameLine();
+            if (Button("Cancel", {120, 0}) || IsKeyDown(GLFW_KEY_ESCAPE)) {
+                CloseCurrentPopup();
+            }
+
+            EndPopup();
+        }
+
+        if (BeginPopupModal("New File...", nullptr, ImGuiWindowFlags_AlwaysAutoResize)){
+            SetLabelWidth(50);
+            SetWidgetWidth(200);
+            WidgetWithLeftLabel("Name", [&]{
+                showInputText(newFilename);
+            });
+            WidgetWithLeftLabel("Size", [&]{
+                InputFloat2("", &newFileBlockSize.x, "%.f");
+            });
+            SetLabelWidth(0);
+            SetWidgetWidth(0);
+
+            if (Button("OK", {120, 0}) || IsKeyDown(GLFW_KEY_ENTER)) {
+                if (newFilename.rfind(".json") == std::string::npos) {
+                    newFilename += ".json";
+                }
+
+                auto bk = Block::create(newFilename);
+                bk->setSize({newFileBlockSize.x, newFileBlockSize.y});
+                setRootBlockAttrs(bk);
+                setCurFileBlock(newFilename, bk);
+
+                CloseCurrentPopup();
+            }
+            SameLine();
+            if (Button("Cancel", {120, 0}) || IsKeyDown(GLFW_KEY_ESCAPE)) {
+                CloseCurrentPopup();
+            }
+
+            EndPopup();
+        }
+
+        if (!curFilename.empty()){
+            SameLine();
+
+            SetCursorPosY(cfg.bottomBarHeight * 0.5f - GetFontSize() * 0.5f);
+
+            const auto& rootBlock = getCurFileBlock();
+            BeginChild("stats", {GetWindowContentRegionWidth() * 0.5f, GetFontSize()});
+            Text("Draw Calls: %u, FPS: %.1f, Blocks: %u, Vertices: %u, Indices: %u, Textures: %u",
+                max(renderer->getDrawCmds().size(), 2u) - 2, io.Framerate, getCurFileBlock()->getChildren().size(),
+                renderer->getBufferGroup()->getItem("b_vertex").elementCount,
+                renderer->getBufferGroup()->getItem("b_index").elementCount,
+                sharedTexGroup->getStorageMap().size());
+            EndChild();
+
+            SameLine();
+
+            BeginChild("file block");
+            Text("Size: %.fx%.f, Scale: %.1f",
+                rootBlock->getLayout().size.x, rootBlock->getLayout().size.y,
+                rootBlock->getLayout().scale.x);
+            if (showSavedStatus){
+                SameLine();
+                Text("successfully saved");
+            }
+            EndChild();
+        }
+        static float statusTimeCount{0};
+        if (showSavedStatus && (statusTimeCount += pane.window.dt) > 5.0f){
+            statusTimeCount = 0;
+            showSavedStatus = false;
+        }
+    End();
+    if (openHelpWindow){
+        winFlags = 0;
+        auto fbSize = io.DisplayFramebufferScale * io.DisplaySize;
+        SetNextWindowPos(fbSize * 0.5f, ImGuiCond_Once, {0.5f, 0.5f});
+        SetNextWindowSize({460, 400}, ImGuiCond_Once);
+        if (Begin("Help", &openHelpWindow, winFlags)){
+            Text("Operation Guide");
+            BulletText("Drop 'json/psd/png/jpg' files into the editor to open them");
+            BulletText("Drag and drop a layer to change the order");
+            Separator();
+            Text("Shortcut Keys");
+            BulletText("Delete block - DELETE");
+            BulletText("Copy block - CTRL+D");
+            BulletText("Array copy block - CTRL+E");
+            BulletText("Only show selected layer - ALT+CLICK EYE ICON");
+            BulletText("Only unlock selected layer - ALT+CLICK UNLOCK ICON");
+            BulletText("Show specified type of block parameter - RIGHT CLICK A BLOCK");
+            BulletText("Move current file view - SPACE+LEFT BUTTON");
+            BulletText("Scale current file view - ALT+MIDDLE BUTTON");
+            BulletText("Move selected block right - ARROW RIGHT");
+            BulletText("Move selected block left - ARROW LEFT");
+            BulletText("Move selected block up - ARROW UP");
+            BulletText("Move selected block down - ARROW DOWN");
+            BulletText("Create new file - CTRL+N");
+            BulletText("Save current file - CTRL+S");
+            BulletText("Save current file as a different name - CTRL+SHIFT+S");
+            BulletText("Duplicate current file - CTRL+U");
+            BulletText("Open help window - F1");
+            Separator();
+            Text("Default Directory");
+            BulletText("Json - '%s'", UiEditor::s_jsonDirectory.c_str());
+            BulletText("Psd layer - '%s'", UiEditor::s_psdLayerDirectory.c_str());
+            BulletText("Font - '%s'", UiEditor::s_fontDirectory.c_str());
+            BulletText("UI - '%s'", UiEditor::s_uiDirectory.c_str());
+            Separator();
+            Text("Notice");
+            BulletText("Saving a psd file will save psd images too");
+            BulletText("Adjusting the order of layers can reduce the number of draw calls");
+            BulletText("When lock a block, you cannot edit its parameter");
+        }
+        End();
+    }
+}
+
+void UiEditor::show(size_t cIndex, size_t pIndex){
+    handleDroppedFiles();
+
+    //-----------------
+    // show windows
+    auto& pane = projLayout.getPane(cIndex, pIndex);
+    auto ltPos = ImVec2{0, 0};// left top position of file view
+    auto rtPos = ImVec2{0, 0};// right top position of file view
+    auto layerPos = ImVec2{0, 0};// layer window position
+
+    // show tab bar window
+    auto tabBarFlags = ImGuiTabBarFlags_Reorderable |
+                       ImGuiTabBarFlags_NoTooltip |
+                       ImGuiTabBarFlags_AutoSelectNewTabs;
+
+    PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+
+    curFilename = "";
+    BeginPane("Main View", pane.height, ImGuiWindowFlags_NoTitleBar);
+        if (BeginTabBar("Tab Bar", tabBarFlags)){
+            for(const auto& pr : fileBlockMap){
+
+                if (!openFileTabMap.at(pr.first)) { continue; }
+
+                auto tabLabel = getSubstr(pr.first, {"-\\", "-/"});
+                if (BeginTabItem(tabLabel.c_str(), &openFileTabMap[pr.first])){
+                    const auto& rootBlock = pr.second;
+
+                    curFilename = pr.first;
+
+                    if (lastFilename != pr.first){
+                        lastFilename = pr.first;
+                        const auto& children = rootBlock->getChildren();
+                        selectedBlock = children.empty() ? rootBlock : children.back();
+                    }
+
+                    rootBlock->updateMatrix(mat3{1.0f});
+                    rootBlock->draw(renderer);
+                    for(const auto& child : rootBlock->getChildren()){
+                        if (child->isVisible()) { child->draw(renderer); }
+                    }
+
+                    BeginChild("File View");
+                        ltPos = GetWindowPos();
+                        rtPos = ltPos + ImVec2{GetWindowWidth(), 0};
+
+                        pane.updateWindow();
+                        updateFileView(pane);
+                        pane.updateInput();
+                        pane.window.focused = !IsPopupOpen("Block Menu") && !IsPopupOpen("CopyEx");
+
+                        auto invModelMat = inverse(getCurFileBlock()->getLayout().srtMat);
+                        renderer->getProgram()->setUniformf("u_invModelMat", {&invModelMat, 9});
+
+                        auto drawList = GetWindowDrawList();
+                        drawList->AddCallback([](const ImDrawList* parent_list, const ImDrawCmd* cmd){
+                            (void)parent_list;
+                            auto editor = (UiEditor*)(cmd->UserCallbackData);
+                            editor->renderer->render(editor->projLayout.getPane(0, 0));
+                        }, this);
+                        drawList->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+
+                        auto sz = CalcTextSize("(?)");
+                        SetCursorPos({0, GetWindowHeight() - sz.y});
+                        Text("(?)");
+                        if (IsItemHovered())
+                        {
+                            BeginTooltip();
+                            PushTextWrapPos(GetFontSize() * 35.0f);
+                            TextUnformatted("Drop 'json/psd/png/jpg' files into the editor to open them");
+                            PopTextWrapPos();
+                            EndTooltip();
+                        }
+                    EndChild();
+
+                    EndTabItem();
+                }
+            }
+            EndTabBar();
+        }
+    EndPane();
+    PopStyleVar();
+
+    // show other windows
+    if (!curFilename.empty()){
+        showBlock(ltPos, pane);
+        showLayers(rtPos, pane);
+        showParameter(rtPos + ImVec2(0, cfg.layerPanelSize.y + GetStyle().ItemSpacing.y), pane);
+    }
+    showBottomBar(pane);
+
+    for(const auto& pr : openFileTabMap){
+        if (!pr.second) fileBlockMap.erase(pr.first);
+    }
+}
+
+---

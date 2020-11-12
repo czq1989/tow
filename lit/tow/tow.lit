@@ -1,0 +1,470 @@
+@s
+
+--- tow.h
+#ifndef TINY_OPENGL_WRAPPER_H
+#define TINY_OPENGL_WRAPPER_H
+
+#ifdef DEBUG
+    #define GLAD_USE_DEBUG_CALLBACK
+#endif
+#include "glad.h"
+
+#include <cassert>
+#include <map>
+#include <unordered_set>
+#include <functional>
+
+namespace tow{
+@{debug}
+@{resource pointer}
+@{array}
+@{snapshot}
+@{vertex specification}
+@{programable stages}
+@{pipeline}
+@{draw functions}
+@{dispatch functions}
+}
+
+#endif
+---
+
+--- tow.cpp
+#include "tow.h"
+
+#include "call_stack.h"
+
+#include <cstdio>
+#include <cstdarg>
+#include <algorithm>
+
+namespace tow{
+//---------------------
+// config
+//#define USE_TOW_ASSERT
+
+//-----------------------
+// assert
+#ifdef USE_TOW_ASSERT
+    static void mfprintf() {}
+    static void mfprintf(const char* format, ...) {
+        va_list argList;
+        va_start(argList, format);
+        vfprintf(stderr, format, argList);
+        va_end(argList);
+    }
+    #ifdef DEBUG
+        #define mAssert(expr, ...)\
+        do{\
+            if (!(expr)){\
+                mfprintf(__VA_ARGS__);\
+                mfprintf("\n");\
+                CallStack::get()->printStack(0, 7);\
+                assert(false);\
+            }\
+        }while(0)
+    #else
+        #define mAssert(expr, ...) (void)0
+    #endif
+#else
+    #ifdef DEBUG
+        #define mAssert(expr, ...) assert(expr)
+    #else
+        #define mAssert(expr, ...) (void)0
+    #endif
+#endif
+
+@{debug implemention}
+@{snapshot implemention}
+@{utility}
+@{vertex specification implemention}
+@{programable stages implemention}
+@{pipeline implemention}
+@{draw functions implemention}
+@{dispatch functions implemention}
+}
+---
+
+--- debug
+//------------------------
+// opengl debug message
+void enableDebugMessageOutput();
+---
+
+--- debug implemention
+//------------------------
+// opengl debug message
+static std::map<int, const char*> s_DebugSource = {
+    {GL_DEBUG_SOURCE_API, "api"},
+    {GL_DEBUG_SOURCE_WINDOW_SYSTEM, "window system"},
+    {GL_DEBUG_SOURCE_SHADER_COMPILER, "shader compiler"},
+    {GL_DEBUG_SOURCE_THIRD_PARTY, "third party"},
+    {GL_DEBUG_SOURCE_APPLICATION, "application"},
+    {GL_DEBUG_SOURCE_OTHER, "other"}
+};
+static std::map<int, const char*> s_DebugType = {
+    {GL_DEBUG_TYPE_ERROR, "error"},
+    {GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR, "deprecated behavior"},
+    {GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR, "undefined behavior"},
+    {GL_DEBUG_TYPE_PORTABILITY, "portability"},
+    {GL_DEBUG_TYPE_PERFORMANCE, "performance"},
+    {GL_DEBUG_TYPE_OTHER, "other"}
+};
+static std::map<int, const char*> s_DebugSeverity = {
+    {GL_DEBUG_SEVERITY_HIGH, "height"},
+    {GL_DEBUG_SEVERITY_MEDIUM, "medium"},
+    {GL_DEBUG_SEVERITY_LOW, "low"},
+    {GL_DEBUG_SEVERITY_NOTIFICATION, "notification"}
+};
+static std::map<int, const char*> s_DebugError = {
+    {GL_INVALID_ENUM, "invalid enum"},
+    {GL_INVALID_VALUE, "invalid value"},
+    {GL_INVALID_OPERATION, "invalid operation"},
+    {GL_NO_ERROR, "no error"},
+    {GL_INVALID_FRAMEBUFFER_OPERATION, "invalid framebuffer operation"},
+    {GL_OUT_OF_MEMORY, "out of memory"},
+    {GL_STACK_UNDERFLOW, "stack underflow"},
+    {GL_STACK_OVERFLOW, "stack overflow"}
+};
+
+static void APIENTRY debugMsgCallback(GLenum source, GLenum type, GLuint id,
+    GLenum severity, GLsizei length, const GLchar *message, const void *userParam) {
+
+    (void)length;
+    (void)userParam;
+
+    // filter out some annoying messages
+    if (id == 0x20071 || id == 0x20043 || id == 0x20084) {
+        return;
+    }
+
+    fprintf(stderr, "[debug] %s %s (%s) 0x%x\n%s\n\n", s_DebugSource[source], s_DebugType[type],
+    s_DebugSeverity[severity], id, message);
+}
+
+static void gladPostCallback(const char *name, void *funcptr, int len_args, ...){
+    (void)funcptr;
+    (void)len_args;
+
+    auto errCode = glad_glGetError();
+    if (errCode != GL_NO_ERROR) {
+        fprintf(stderr, "[glad] api error, code: 0x%04x(%s), function: '%s'\n", errCode, s_DebugError[errCode],
+                  name);
+        CallStack::get()->printStack();
+        exit(1);
+    }
+}
+
+void enableDebugMessageOutput(){
+    int flags;
+    glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+    if (flags & GL_CONTEXT_FLAG_DEBUG_BIT){
+        glEnable(GL_DEBUG_OUTPUT);
+        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        glDebugMessageCallbackKHR(debugMsgCallback, nullptr);
+        glDebugMessageControlKHR(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
+    }
+
+    glad_set_post_callback(gladPostCallback);
+}
+---
+
+--- resource pointer
+//-----------------------
+// simple shared pointer
+template<typename T>
+class ResourcePtr{
+public:
+    ResourcePtr() {}
+    ResourcePtr(nullptr_t) {}
+    explicit ResourcePtr(T* ptr) : objectPtr(ptr) {
+        refCount = new size_t(1);
+    }
+    ResourcePtr(const ResourcePtr& other){
+        refCount = other.refCount;
+        objectPtr = other.objectPtr;
+        if(refCount){
+            ++*refCount;
+        }
+    }
+    ResourcePtr& operator=(const ResourcePtr& other){
+        if (this != &other){
+            if (refCount && --*refCount == 0){
+                delete refCount;
+                delete objectPtr;
+            }
+            refCount = other.refCount;
+            objectPtr = other.objectPtr;
+
+            if(refCount){
+                ++*refCount;
+            }
+        }
+        return *this;
+    }
+    T* operator ->() const{
+        return objectPtr;
+    }
+    operator bool() const{
+        return objectPtr != nullptr;
+    }
+    auto operator ==(const ResourcePtr& rhs) const{
+        return objectPtr == rhs.objectPtr;
+    }
+    auto operator !=(const ResourcePtr& rhs) const{
+        return objectPtr != rhs.objectPtr;
+    }
+    ~ResourcePtr(){
+        if (refCount && --*refCount == 0){
+            delete refCount;
+            delete objectPtr;
+        }
+    }
+    auto getRefCount() const{
+        return *refCount;
+    }
+    auto getObjectPtr() const{
+        return objectPtr;
+    }
+
+private:
+    T* objectPtr{nullptr};
+    size_t* refCount{nullptr};
+};
+---
+
+--- array
+//---------------------------
+// a simple vector wrapper
+template<typename T>
+class DynamicArray{
+public:
+    auto nonempty() const { return count > 0; }
+    auto size() const { return count; }
+    auto data() { return v.data(); }
+
+    T& at(size_t i) { assert(i < count); return v.at(i); }
+    const T& at(size_t i) const { assert(i < count); return v.at(i); }
+    auto begin() { return v.begin(); }
+    auto end() { return v.begin() + count; }
+
+    T& back() { assert(count); return v.at(count - 1); }
+    const T& back() const { assert(count); return v.at(count - 1); }
+
+    void clear() { count = 0; }
+    void shrink_to_fit() { v.shrink_to_fit(); }
+
+    void push_back(const T& e){
+        if (count < v.size()){
+            v[count] = e;
+        }else{
+            v.push_back(e);
+        }
+        ++count;
+    }
+
+    T& raw_back(){
+        if (count >= v.size()){
+            v.push_back({});
+        }
+        return v.at(count++);
+    }
+
+private:
+    std::vector<T> v;
+    size_t count{0};
+};
+
+---
+
+--- snapshot
+//---------------
+// snapshot
+class Snapshot{
+public:
+    struct Record{
+        int what{0};
+        std::vector<GLboolean> bv;
+        std::vector<GLint> iv;
+        std::vector<GLfloat> fv;
+        std::function<void (const GLboolean* v)> restoreb;
+        std::function<void (const GLint* v)> restorei;
+        std::function<void (const GLfloat* v)> restoref;
+    };
+
+private:
+    Snapshot();
+
+public:
+    static tow::ResourcePtr<Snapshot> create();
+
+public:
+    void takeIsEnabled(int what, std::function<void(const GLboolean* v)> f = nullptr);
+    void take(int what, std::function<void(const GLfloat* v)> f);
+    void take(int what, std::function<void(const GLint* v)> f);
+
+    void restore();
+
+public:
+    std::vector<Record> records;
+};
+using SnapshotPtr = tow::ResourcePtr<Snapshot>;
+---
+
+--- snapshot implemention
+//--------------------------
+// snapshot implemention
+Snapshot::Snapshot(){}
+
+tow::ResourcePtr<Snapshot> Snapshot::create() {
+    return tow::ResourcePtr<Snapshot>(new Snapshot());
+}
+
+void Snapshot::takeIsEnabled(int what, std::function<void(const GLboolean* v)> f){
+    Record rec;
+    rec.what = what;
+    rec.bv.resize(16);
+    glGetBooleanv(what, rec.bv.data());
+    if (f){
+        rec.restoreb = f;
+    }else{
+        rec.restoreb = [=](const GLboolean* v){ v[0] ? glEnable(what) : glDisable(what);};
+    }
+    records.push_back(rec);
+}
+
+void Snapshot::take(int what, std::function<void(const GLint* v)> f){
+    Record rec;
+    rec.what = what;
+    rec.iv.resize(16);
+    glGetIntegerv(what, rec.iv.data());
+    rec.restorei = f;
+    records.push_back(rec);
+}
+
+void Snapshot::take(int what, std::function<void(const GLfloat* v)> f){
+    Record rec;
+    rec.what = what;
+    rec.fv.resize(16);
+    glGetFloatv(what, rec.fv.data());
+    rec.restoref = f;
+    records.push_back(rec);
+}
+
+void Snapshot::restore(){
+    for(const auto& r : records){
+         if (r.restoreb){
+            r.restoreb(r.bv.data());
+         }else if (r.restorei){
+            r.restorei(r.iv.data());
+         }else{
+            r.restoref(r.fv.data());
+         }
+    }
+}
+---
+
+--- utility
+//===============================
+// utility functions
+static const std::map<int, size_t> s_byteComponentTypeMap = {
+    {GL_BYTE, sizeof(GLbyte)},
+    {GL_UNSIGNED_BYTE, sizeof(GLubyte)},
+    {GL_SHORT, sizeof(GLshort)},
+    {GL_UNSIGNED_SHORT, sizeof(GLushort)},
+    {GL_INT, sizeof(GLint)},
+    {GL_UNSIGNED_INT, sizeof(GLuint)},
+    {GL_HALF_FLOAT, sizeof(GLhalf)},
+    {GL_FLOAT, sizeof(GLfloat)},
+    {GL_DOUBLE, sizeof(GLdouble)},
+    {GL_FIXED, sizeof(GLfixed)},
+    {GL_INT_2_10_10_10_REV, 4},
+    {GL_UNSIGNED_INT_2_10_10_10_REV, 4},
+    {GL_UNSIGNED_INT_10F_11F_11F_REV , 4}
+};
+
+static int getShaderTypeBySuffix(const std::string& filename){
+    auto pos = filename.rfind(".");
+    mAssert(pos != std::string::npos);
+
+    auto suffix = filename.substr(pos);
+
+    if (suffix == ".vert"){
+        return GL_VERTEX_SHADER;
+    }else if (suffix == ".frag"){
+        return GL_FRAGMENT_SHADER;
+    } else if (suffix == ".geom"){
+        return GL_GEOMETRY_SHADER;
+    }else if (suffix == ".tesc"){
+        return GL_TESS_CONTROL_SHADER;
+    }else if (suffix == ".tese"){
+        return GL_TESS_EVALUATION_SHADER;
+    }else if (suffix == ".comp"){
+        return GL_COMPUTE_SHADER;
+    }else{
+        mAssert(false);
+    }
+    return 0;
+}
+
+//--------------------------------------
+// use for glGen*(num, &handles)
+#define GEN_OBJECTS(func, num, handles)\
+do{\
+    func(num, &handles);\
+    mAssert(handles > 0);\
+}while(0)
+
+#define GEN_OBJECT(func, handle) GEN_OBJECTS(func, 1, handle)
+
+//---------------------------------------
+// use for glDelete*(num, &handles)
+#define DEL_OBJECTS(func, num, handles)\
+do{\
+    func(num, &handles);\
+}while(0)
+
+#define DEL_OBJECT(func, handle) DEL_OBJECTS(func, 1, handle)
+
+//------------------------------
+// use for glCreate*(...)
+#define CREATE_OBJECT(func, handle, ...)\
+do{\
+    handle = func(__VA_ARGS__);\
+    mAssert(handle > 0);\
+}while(0)
+
+//--------------------------------
+// use for  glDelete*(handle)
+#define FREE_OBJECT(func, handle)\
+do{\
+    func(handle);\
+}while(0)
+----
+
+@include tow\vertex_specification.lit
+@include tow\programable_stages.lit
+@include tow\pipeline.lit
+@include tow\draw_functions.lit
+
+--- dispatch functions
+//============================
+// dispatch functions
+void distpatchCompute(ComputePipelinePtr pipe, int barrierBits);
+void distpatchCompute(ComputePipelinePtr pipe);
+---
+
+--- dispatch functions implemention
+//======================================
+// dispatch functions implemention
+void distpatchCompute(ComputePipelinePtr pipe, int barrierBits){
+    pipe->setupDispatch();
+    glDispatchCompute(pipe->getNumX(), pipe->getNumY(), pipe->getNumZ());
+    glMemoryBarrier(barrierBits);
+}
+
+void distpatchCompute(ComputePipelinePtr pipe){
+    pipe->setupDispatch();
+    glDispatchCompute(pipe->getNumX(), pipe->getNumY(), pipe->getNumZ());
+}
+---

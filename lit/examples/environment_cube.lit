@@ -1,0 +1,154 @@
+
+@comment_type // %s
+
+@s
+
+--- environment_cube.h
+#ifndef ENVIRONMENT_CUBE_H
+#define ENVIRONMENT_CUBE_H
+
+#include "tow.h"
+#include "glm.hpp"
+
+class EnvironmentCube;
+using EnvironmentCubePtr = tow::ResourcePtr<EnvironmentCube>;
+
+class EnvironmentCube{
+private:
+    EnvironmentCube(){}
+
+public:
+    static EnvironmentCubePtr create(const std::string& cubeFilename, float scale = 10000.0f,
+        bool flipV = false);
+
+public:
+    void draw(const glm::mat4& pvMat);
+    void setScale(float scale) { scaleFactor = scale; }
+
+    const auto& getTexGroup() const { return texGroup; }
+    const auto& getPipeline() const { return pipeline; }
+    auto getScale() const { return scaleFactor; }
+
+private:
+    tow::GraphicPipelinePtr pipeline;
+    tow::TextureGroupPtr texGroup;
+    float scaleFactor{1.0f};
+};
+#endif
+---
+
+--- environment_cube.cpp
+#include "environment_cube.h"
+
+#include "asset_manager.h"
+#include "example_util.h"
+#include "gtc/matrix_transform.hpp"
+
+using namespace tow;
+using namespace glm;
+
+EnvironmentCubePtr EnvironmentCube::create(const std::string& cubeFilename, float scale, bool flipV){
+    auto ptr = new EnvironmentCube();
+    ptr->scaleFactor = scale;
+
+    // load cube image
+    auto texGroup = TexGroup::create();
+    if (getSuffix(cubeFilename) == "hdr"){
+        ImageAsset()->loadImagef(cubeFilename, {texGroup, "s_cube"}, flipV);
+    }else{
+        ImageAsset()->loadImage8(cubeFilename, {texGroup, "s_cube"}, flipV);
+    }
+    ptr->texGroup = texGroup;
+
+    // specify vertex layout
+    struct Vertex{
+        vec3 position;
+    };
+
+    auto layout = VertexLayout::create();
+    layout->add("a_position", {GL_FLOAT, 3, false, 0});
+    layout->stride(sizeof(Vertex));
+
+    // load vertices and indices
+    Vertex vertices[] = {
+        {vec3(+1, -1, +1)},
+        {vec3(+1, -1, -1)},
+        {vec3(+1, +1, -1)},
+        {vec3(+1, +1, +1)},
+
+        {vec3(-1, -1, +1)},
+        {vec3(-1, +1, +1)},
+        {vec3(-1, +1, -1)},
+        {vec3(-1, -1, -1)}
+    };
+
+    GLubyte indices[] = {
+        2, 1, 0, // +x
+        3, 2, 0, // +x
+
+        6, 5, 4, // -x
+        7, 6, 4, // -x
+
+        6, 2, 3, // +y
+        5, 6, 3, // +y
+
+        7, 4, 0, // -y
+        1, 7, 0, // -y
+
+        5, 3, 0, // +z
+        4, 5, 0, // +z
+
+        6, 7, 1, // -z
+        2, 6, 1, // -z
+    };
+
+    auto bufGroup = BufferGroup::create();
+    bufGroup->createBuffer("b_vertex", vertices,
+            {GL_ARRAY_BUFFER, sizeof(Vertex), sizeof(vertices) / sizeof(Vertex), GL_STATIC_DRAW});
+    bufGroup->createBuffer("b_index", indices,
+            {GL_ELEMENT_ARRAY_BUFFER, sizeof(GLubyte), sizeof(indices) / sizeof(GLubyte), GL_STATIC_DRAW});
+
+    // create graphic pipeline
+    auto vertexArray = VertexArray::create({bufGroup, "b_vertex", "b_index"}, layout);
+    auto program = Program::create({
+        "assets/shaders/environment_cube.vert",
+        "assets/shaders/environment_cube.frag",
+    }, layout);
+
+    ptr->pipeline = GraphicPipeline::create(vertexArray, program);
+
+    return EnvironmentCubePtr(ptr);
+}
+
+void EnvironmentCube::draw(const mat4& pvMat){
+    auto prog = pipeline->getProgram();
+
+    prog->setSampler(texGroup, "s_cube");
+
+    auto modelMat = scale(mat4(1), vec3(scaleFactor));
+    prog->setUniformf("u_modelMat", {&modelMat, 16});
+
+    auto pvmMat = pvMat * modelMat;
+    prog->setUniformf("u_pvmMat", {&pvmMat, 16});
+
+
+    drawElements(pipeline, GL_TRIANGLES);
+}
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

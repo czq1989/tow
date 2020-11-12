@@ -1,0 +1,166 @@
+@comment_type // %s
+
+@s
+
+--- sh_irradiance.h
+#ifndef SH_IRRADIANCE_H
+#define SH_IRRADIANCE_H
+
+#include <string>
+
+// a simple method to generate spherical harmonic irradiance map
+struct SH_Irradiance{
+    static void generate(const std::string& srcCube, const std::string& dstCube);
+};
+
+#endif
+---
+
+--- sh_irradiance.cpp
+#include "sh_irradiance.h"
+
+#include "asset_manager.h"
+#include "example_util.h"
+#include "glm.hpp"
+
+#include "gtx/transform.hpp"
+
+using namespace glm;
+
+void SH_Irradiance::generate(const std::string& srcCube, const std::string& dstCube){
+    bool isHdr = getSuffix(srcCube) == "hdr";
+    if (isHdr){
+        ImageAsset()->loadImagef(srcCube);
+    }else{
+        ImageAsset()->loadImage8(srcCube);
+    }
+
+    const auto& image = ImageAsset()->getImage(srcCube);
+
+    struct Sample{
+        int face{0};
+        int x{0}, y{0};
+        std::vector<double> k;
+    };
+
+    Sample* samples;
+    size_t num = image.width * image.height * 6;
+    samples = new Sample[num];
+
+    // see https://en.wikipedia.org/wiki/Cube_mapping#Memory_addressing
+    auto cubeUV2XYZ = [](int face, float u, float v)->vec3{
+        float x = u * 2 - 1;
+        float y = v * 2 - 1;
+        switch(face){
+            case 0: return {+1, +y, -x};//+x
+            case 1: return {-1, +y, +x};//-x
+            case 2: return {+x, +1, -y};//+y
+            case 3: return {+x, -1, +y};//-y
+            case 4: return {+x, +y, +1};//+z
+            case 5: return {-x, +y, -1};//-z
+            default: assert(false);
+        }
+        return {};
+    };
+
+    size_t index = 0;
+    for(int face = 0; face < 6; ++face){
+        for(int i = 0; i < image.width; ++i){
+            for(int j = 0; j < image.height; ++j){
+                vec3 dir;
+                float u = (float)i / (image.width - 1);
+                float v = 1 - (float)j / (image.height - 1);
+
+                dir = normalize(cubeUV2XYZ(face, u, v));
+
+                Sample s;
+                s.face = face;
+                s.x = i;
+                s.y = j;
+
+                s.k.resize(9);
+
+                s.k[0] = 0.282095;
+
+                s.k[1] = 0.488603 * dir.x;
+                s.k[2] = 0.488603 * dir.y;
+                s.k[3] = 0.488603 * dir.z;
+
+                s.k[4] = 1.092548 * dir.x * dir.z;
+                s.k[5] = 1.092548 * dir.y * dir.z;
+                s.k[6] = 1.092548 * dir.x * dir.y;
+
+                s.k[7] = 0.315392 * (3.0 * dir.z * dir.z - 1.0);
+                s.k[8] = 0.546274 * (dir.x * dir.x - dir.y * dir.y);
+
+                samples[index++] = s;
+            }
+        }
+    }
+
+    auto sampleCube = [=](int face, int x, int y)->auto{
+        if (isHdr){
+            auto data = (vec4*)image.pixelPtrs[face];
+            const auto& c = data[y * image.width + x];
+            return dvec3((double)c.x, (double)c.y, (double)c.z);
+        }else{
+            auto data = (u8vec4*)image.pixelPtrs[face];
+            const auto& c = data[y * image.width + x];
+            return dvec3(c.x / 255.0, c.y / 255.0, c.z / 255.0);
+        }
+    };
+
+    dvec3 avgK[9]{dvec3(0.0)};
+
+    for(size_t a = 0; a < num; ++a){
+        auto& s = samples[a];
+        auto color = sampleCube(s.face, s.x, s.y);
+        for(int i = 0; i < 9; ++i){
+            avgK[i] += color * s.k[i];
+        }
+    }
+
+    const auto factor = 4 * 3.141596 / num;
+    for(int i = 0; i < 9; ++i){
+        avgK[i] *= factor;
+    }
+
+    auto writeColor = [=](int face, int x, int y, const vec3& color){
+        if (isHdr){
+            auto data = (vec4*)image.pixelPtrs[face];
+            data[y * image.width + x] = vec4(color, 1);
+        }else{
+            auto r = clamp(color.r, 0.0f, 1.0f);
+            auto g = clamp(color.g, 0.0f, 1.0f);
+            auto b = clamp(color.b, 0.0f, 1.0f);
+            u8vec3 c = u8vec3(vec3(r, g, b) * 255.0f);
+
+            auto data = (u8vec4*)image.pixelPtrs[face];
+            data[y * image.width + x] = u8vec4(c, 255);
+        }
+    };
+
+    for(size_t a = 0; a < num; ++a){
+        auto& s = samples[a];
+        vec3 color{0};
+        for(int i = 0; i < 9; ++i){
+            color += s.k[i] * avgK[i];
+        }
+        writeColor(s.face, s.x, s.y, color);
+    }
+
+    if (isHdr){
+        for(int i = 0; i < 6; ++i){
+            ImageAsset()->writeImage(dstCube + ImageCache::cubeMapFaceNames[i] + ".hdr",
+                image.width, image.height, 4, image.pixelPtrs[i]);
+        }
+    }else{
+        for(int i = 0; i < 6; ++i){
+            ImageAsset()->writeImage(dstCube + ImageCache::cubeMapFaceNames[i] + ".png",
+                image.width, image.height, 4, image.pixelPtrs[i]);
+        }
+    }
+
+    ImageAsset()->removeImage(srcCube);
+}
+---

@@ -1,0 +1,1990 @@
+
+@s
+
+--- gltf_model.h
+#ifndef GLTF_MODEL_H
+#define GLTF_MODEL_H
+
+// gltf dependency graph
+/*
+node---mesh---primitives---primitive A---vertex layout
+   |     |                             |---vertex bufffer
+   |     |                             |---index buffer
+   |     |                             |---material
+   |     |                             |---morph targets
+   |     |---morph target weights
+   |
+   |---camera---perspective
+   |        |---ortho
+   |        |---view---node transform
+   |
+   |---skin---joints---joint A---inverse bind matrix
+   |      |                  |---node transform
+   |      |---sketelon---node transform
+   |
+   |---transform---translation
+               |---rotation
+               |---scale
+
+animation---samplers---sampler A---input
+        |                      |---ouput
+        |                      |---interpolation
+        |
+        |---channels---channel A---sampler
+                               |---target node
+                               |---target path
+
+model---scenes---root nodes
+    |---nodes
+    |---cameras
+    |---animations
+    |---skins
+    |---materials
+*/
+
+#include "tow.h"
+#include "tiny_gltf.h"
+#include "camera.h"
+
+namespace tinygltf{
+    class Model;
+}
+
+class GltfNode;
+using GltfNodePtr = tow::ResourcePtr<GltfNode>;
+
+@{camera}
+@{camera creator}
+@{material}
+@{material creator}
+@{mesh}
+@{mesh creator}
+@{skin}
+@{skin creator}
+@{node}
+@{node creator}
+@{animation}
+@{asset info}
+@{model}
+
+#endif
+---
+
+--- gltf_model.cpp
+#include "gltf_model.h"
+
+#define TINYGLTF_IMPLEMENTATION
+#define TINYGLTF_NOEXCEPTION
+
+#pragma warning(disable : 4005)
+#include "tiny_gltf.h"
+#pragma warning(default : 4005)
+
+#include "glm.hpp"
+#include "gtc/matrix_transform.hpp"
+#include "gtx/quaternion.hpp"
+#include "gtx/compatibility.hpp"
+#include "gtx/matrix_decompose.hpp"
+
+#include "example_util.h"
+
+using namespace glm;
+using namespace tow;
+
+@{camera implemention}
+@{camera creator implemention}
+@{material implemention}
+@{material creator implemention}
+@{mesh implemention}
+@{mesh creator implemention}
+@{skin implemention}
+@{skin creator implemention}
+@{node implemention}
+@{node creator implemention}
+@{animation implemention}
+@{model implemention}
+---
+
+--- camera
+//-----------------
+// camera
+class GltfCamera{
+    friend struct GltfCameraCreator;
+    friend struct GltfNodeCreator;
+
+private:
+    GltfCamera(){}
+
+public:
+    static tow::ResourcePtr<GltfCamera> create();
+
+public:
+    const CameraPtr& getCamera(const glm::mat4& globalTsmMat);
+    auto getNodeIndex() const { return nodeIndex; }
+
+private:
+    CameraPtr camera;
+    size_t nodeIndex{(size_t)-1};
+};
+using GltfCameraPtr = tow::ResourcePtr<GltfCamera>;
+---
+
+--- camera implemention
+//----------------------------
+// camera implemention
+GltfCameraPtr GltfCamera::create(){
+    return GltfCameraPtr(new GltfCamera());
+}
+
+const CameraPtr& GltfCamera::getCamera(const glm::mat4& globalTsmMat){
+    const auto& eye = vec3(globalTsmMat[3]);
+    const auto& target = eye + normalize(-vec3(globalTsmMat[2])) * length(eye);
+    const auto& up = normalize(vec3(globalTsmMat[1]));
+
+    auto& view = camera->getView();
+    view.eye = eye;
+    view.target = target;
+    view.up = up;
+
+    return camera;
+}
+---
+
+--- camera creator
+//--------------------------
+// camera creator
+struct GltfCameraCreator{
+    static std::vector<GltfCameraPtr> create(tinygltf::Model* model);
+};
+---
+
+--- camera creator implemention
+//-----------------------------------
+// camera creator implemention
+std::vector<GltfCameraPtr> GltfCameraCreator::create(tinygltf::Model* model){
+    std::vector<GltfCameraPtr> tfCameras;
+
+    for(const auto& camera : model->cameras){
+        auto tfCamera = GltfCamera::create();
+
+        if (camera.type == "perspective"){
+            // persp zfar
+            auto zfar = (float)camera.perspective.zfar;
+            if (zfar == 0){
+                zfar = std::numeric_limits<float>::max();
+            }
+
+            // persp
+            Camera::Persp camPersp{
+                degrees((float)camera.perspective.yfov),
+                (float)camera.perspective.znear,
+                zfar,
+                (float)camera.perspective.aspectRatio
+            };
+
+            tfCamera->camera = Camera::create({}, camPersp);
+        }else{
+            // ortho zfar
+            auto zfar = (float)camera.orthographic.zfar;
+            if (zfar == 0){
+                zfar = std::numeric_limits<float>::max();
+            }
+
+            // ortho
+            Camera::Ortho camOrtho{
+                vec2((float)camera.orthographic.xmag, (float)camera.orthographic.ymag),
+                (float)camera.orthographic.znear,
+                zfar
+            };
+
+            tfCamera->camera = Camera::create({}, camOrtho);
+        }
+
+        tfCameras.push_back(tfCamera);
+    }
+    return tfCameras;
+}
+---
+
+
+--- material
+//--------------------------
+// material
+class GltfMaterial{
+public:
+    enum AlphaMode{
+        OPAQUENESS = 0,
+        MASK,
+        BLEND
+    };
+
+private:
+    GltfMaterial(){}
+
+public:
+    static tow::ResourcePtr<GltfMaterial> create();
+
+public:
+    void send(tow::ProgramPtr program);
+
+public:
+    tow::TextureGroupPtr texGroup;
+
+    AlphaMode alphaMode{AlphaMode::OPAQUENESS};
+    float alphaCutoff{0};
+    int doubleSided{1};
+
+    glm::vec4 baseColorFactor{0.5f};
+    int baseColorTexCoordIndex{-1};
+
+    float metallicFactor{1};
+    float roughnessFactor{1};
+    int metallicRoughnessTexCoordIndex{-1};
+
+    float normalScale{1};
+    int normalTexCoordIndex{-1};
+
+    float occlusionStrength{1};
+    int occlusionTexCoordIndex{-1};
+
+    glm::vec3 emissiveFactor{0};
+    int emissiveTexCoordIndex{-1};
+};
+using GltfMaterialPtr = tow::ResourcePtr<GltfMaterial>;
+---
+
+--- material implemention
+//=================================
+// material implemention
+tow::ResourcePtr<GltfMaterial> GltfMaterial::create(){
+    return tow::ResourcePtr<GltfMaterial>(new GltfMaterial());
+}
+
+void GltfMaterial::send(tow::ProgramPtr program){
+    program->setUniformi("u_pbrMt.alphaMode", alphaMode);
+    program->setUniformf("u_pbrMt.alphaCutoff", alphaCutoff);
+
+    program->setUniformf("u_pbrMt.baseColorFactor", {&baseColorFactor, 4});
+    program->setUniformi("u_pbrMt.baseColorTexCoordIndex", baseColorTexCoordIndex);
+    if (texGroup->has("s_baseColor")){
+        program->setSampler(texGroup, "s_baseColor");
+    }
+
+    program->setUniformf("u_pbrMt.metallicFactor", metallicFactor);
+    program->setUniformf("u_pbrMt.roughnessFactor", roughnessFactor);
+    program->setUniformi("u_pbrMt.metallicRoughnessTexCoordIndex", metallicRoughnessTexCoordIndex);
+    if (texGroup->has("s_metallicRoughness")){
+        program->setSampler(texGroup, "s_metallicRoughness");
+    }
+
+    program->setUniformf("u_pbrMt.normalScale", normalScale);
+    program->setUniformi("u_pbrMt.normalTexCoordIndex", normalTexCoordIndex);
+    if (texGroup->has("s_normal")){
+        program->setSampler(texGroup, "s_normal");
+    }
+
+    program->setUniformf("u_pbrMt.occlusionStrength", occlusionStrength);
+    program->setUniformi("u_pbrMt.occlusionTexCoordIndex", occlusionTexCoordIndex);
+
+    program->setUniformf("u_pbrMt.emissiveFactor", {&emissiveFactor, 3});
+    program->setUniformi("u_pbrMt.emissiveTexCoordIndex", emissiveTexCoordIndex);
+    if (texGroup->has("s_emissive")){
+        program->setSampler(texGroup, "s_emissive");
+    }
+}
+---
+
+--- material creator
+//---------------------
+// material creator
+struct GltfMaterialCreator{
+    static std::vector<GltfMaterialPtr> create(tinygltf::Model* model);
+};
+---
+
+--- material creator implemention
+//--------------------------------------
+// material creator implemention
+static void createGltfTexture(tinygltf::Model* model, int texInfoIndex,
+    TextureGroupPtr texGroup, const char* texName){
+
+    auto sp = SamplerParam::create();
+
+    const auto& tex = model->textures.at(texInfoIndex);
+    if (tex.sampler >= 0){
+        const auto& samplerInfo = model->samplers.at(tex.sampler);
+        if (samplerInfo.minFilter >= 0){
+            sp->set(GL_TEXTURE_MIN_FILTER, samplerInfo.minFilter);
+        }
+        if (samplerInfo.magFilter >= 0){
+            sp->set(GL_TEXTURE_MAG_FILTER, samplerInfo.magFilter);
+        }
+        sp->set(GL_TEXTURE_WRAP_S, samplerInfo.wrapS);
+        sp->set(GL_TEXTURE_WRAP_T, samplerInfo.wrapT);
+    }
+
+    assert(tex.source >= 0);
+    const auto& image = model->images.at(tex.source);
+    const auto& format = getTexFormat({image.component, image.bits, image.pixel_type});
+    auto pixelFormat = format.first;
+    auto texelFormat = format.second;
+
+    texGroup->create2D(texName, {GL_TEXTURE_2D, 1, texelFormat, sp, image.width, image.height});
+    texGroup->write2D(texName, {image.image.data()}, {pixelFormat});
+}
+
+static const std::map<std::string, GltfMaterial::AlphaMode> s_gltfAlphaModeMap = {
+    {"OPAQUE", GltfMaterial::AlphaMode::OPAQUENESS},
+    {"MASK", GltfMaterial::AlphaMode::MASK},
+    {"BLEND", GltfMaterial::AlphaMode::BLEND}
+};
+
+std::vector<GltfMaterialPtr> GltfMaterialCreator::create(tinygltf::Model* model){
+    std::vector<GltfMaterialPtr> tfMaterials;
+
+    for(const auto& material : model->materials){
+        auto tfMaterial = GltfMaterial::create();
+
+        const auto& pbrMR = material.pbrMetallicRoughness;
+
+        auto texGroup = TexGroup::create();
+        tfMaterial->texGroup = texGroup;
+
+        auto index = pbrMR.baseColorTexture.index;
+        if (index >= 0){
+            createGltfTexture(model, index, texGroup, "s_baseColor");
+        }
+        index = pbrMR.metallicRoughnessTexture.index;
+        if (index >= 0){
+            createGltfTexture(model, index, texGroup, "s_metallicRoughness");
+        }
+        index = material.normalTexture.index;
+        if (index >= 0){
+            createGltfTexture(model, index, texGroup, "s_normal");
+        }
+        index = material.emissiveTexture.index;
+        if (index >= 0){
+            createGltfTexture(model, index, texGroup, "s_emissive");
+        }
+
+        tfMaterial->alphaMode = s_gltfAlphaModeMap.at(material.alphaMode);
+        tfMaterial->alphaCutoff = (float)material.alphaCutoff;
+        tfMaterial->doubleSided = material.doubleSided ? 1 : 0;
+
+        auto bcf = pbrMR.baseColorFactor.data();
+        tfMaterial->baseColorFactor.x =(float)bcf[0];
+        tfMaterial->baseColorFactor.y =(float)bcf[1];
+        tfMaterial->baseColorFactor.z =(float)bcf[2];
+        tfMaterial->baseColorFactor.w =(float)bcf[3];
+        tfMaterial->baseColorTexCoordIndex =
+            texGroup->has("s_baseColor") ? pbrMR.baseColorTexture.texCoord : -1;
+
+        tfMaterial->metallicFactor = (float)pbrMR.metallicFactor;
+        tfMaterial->roughnessFactor = (float)pbrMR.roughnessFactor;
+        tfMaterial->metallicRoughnessTexCoordIndex =
+            texGroup->has("s_metallicRoughness") ? pbrMR.metallicRoughnessTexture.texCoord : -1;
+
+        tfMaterial->normalScale = (float)material.normalTexture.scale;
+        tfMaterial->normalTexCoordIndex =
+            texGroup->has("s_normal") ? material.normalTexture.texCoord : -1;
+
+        tfMaterial->occlusionStrength = (float)material.occlusionTexture.strength;
+        tfMaterial->occlusionTexCoordIndex =
+            texGroup->has("s_metallicRoughness") ? material.occlusionTexture.texCoord : -1;
+
+        auto ef = material.emissiveFactor.data();
+        tfMaterial->emissiveFactor.x =(float)ef[0];
+        tfMaterial->emissiveFactor.y =(float)ef[1];
+        tfMaterial->emissiveFactor.z =(float)ef[2];
+        tfMaterial->emissiveTexCoordIndex =
+            texGroup->has("s_emissive") ? material.emissiveTexture.texCoord : -1;
+
+        tfMaterials.push_back(tfMaterial);
+    }
+
+    return tfMaterials;
+}
+---
+
+--- mesh
+//================
+// mesh
+
+//-------------
+// buffer
+class GltfBuffer{
+public:
+    GltfBuffer() {}
+    GltfBuffer(tinygltf::Model* model, size_t accessorIndex);
+
+public:
+    bool isPackedTightly() const;
+    size_t getSize() const;
+
+public:
+    const unsigned char* data{nullptr};
+    int type{0};
+    size_t count{0};
+
+    size_t componentCount{0};
+    int componentType{0};
+    size_t byteElement{0};
+    bool normalized{false};
+
+    size_t byteStride{0};
+
+    const double* minValues{nullptr};
+    const double* maxValues{nullptr};
+};
+
+//----------------------
+// primitive
+class GltfPrimitive{
+    friend struct GltfMeshCreator;
+
+public:
+    void update(const std::vector<float>& weights);
+    void draw() const;
+
+public:
+    const auto& getMaterial() const { return material; }
+    const auto& getPipeline() const { return pipeline; }
+    const auto& getMorphTargets() const { return morphTargets; }
+
+    const auto& getPositionBuffer() const { return positionBuffer; }
+    const auto& getNormalBuffer() const { return normalBuffer; }
+    const auto& getTangentBuffer() const { return tangentBuffer; }
+
+    auto getVertexCount() const { return vertexCount; }
+
+private:
+    GltfMaterialPtr material;
+    tow::GraphicPipelinePtr pipeline;
+
+private:
+    int mode{0};
+
+    size_t baseVertex{0};
+    size_t startIndex{0};
+    size_t vertexCount{0};
+    size_t indexCount{0};
+
+    std::vector<std::map<std::string, GltfBuffer>> morphTargets;
+
+    GltfBuffer positionBuffer;
+    size_t positionOffset{0};
+
+    GltfBuffer normalBuffer;
+    size_t normalOffset{0};
+
+    GltfBuffer tangentBuffer;
+    size_t tangentOffset{0};
+};
+
+//--------------------
+// mesh
+class GltfMesh;
+using GltfMeshPtr = tow::ResourcePtr<GltfMesh>;
+
+class GltfMesh{
+    friend struct GltfMeshCreator;
+    friend struct GltfNodeCreator;
+    friend class GltfModel;
+    friend class GltfChannel;
+
+public:
+    static GltfMeshPtr create();
+
+public:
+    const auto& getPrimitives() const { return primitives; }
+    const auto& getWeights() const { return weights; }
+    auto getNodeIndex() const { return nodeIndex; }
+
+private:
+    size_t nodeIndex{(size_t)-1};
+
+    std::vector<GltfPrimitive> primitives;
+    std::vector<float> weights;
+
+    glm::vec3 minPos;
+    glm::vec3 maxPos;
+    glm::vec3 centerPos;
+
+    std::vector<glm::vec3> aabb;
+};
+---
+
+--- mesh implemention
+//=============================
+// mesh implemention
+
+//-------------------------
+// buffer implemention
+GltfBuffer::GltfBuffer(tinygltf::Model* model, size_t accessorIndex){
+    if (accessorIndex < 0) return;
+
+    const auto& accessor = model->accessors.at(accessorIndex);
+    const auto& bufferView = model->bufferViews.at(accessor.bufferView);
+
+    data =
+        model->buffers[bufferView.buffer].data.data() + bufferView.byteOffset + accessor.byteOffset;
+
+    type = accessor.type;
+    count = accessor.count;
+    componentCount = tinygltf::GetNumComponentsInType(accessor.type);
+    componentType = accessor.componentType;
+    byteElement = componentCount * tinygltf::GetComponentSizeInBytes(accessor.componentType);
+    normalized = accessor.normalized;
+
+    byteStride = bufferView.byteStride;
+    if (byteStride == 0){
+        byteStride = byteElement;
+    }
+    assert(byteStride >= byteElement);
+
+    minValues = accessor.minValues.data();
+    maxValues = accessor.maxValues.data();
+}
+
+bool GltfBuffer::isPackedTightly() const{
+    return byteStride == byteElement;
+}
+
+size_t GltfBuffer::getSize() const{
+    return byteElement * count;
+}
+
+//--------------------------------
+// primitive implemention
+void GltfPrimitive::draw() const{
+    if (material){
+        if (material->alphaMode == GltfMaterial::AlphaMode::BLEND){
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        }else{
+            glDisable(GL_BLEND);
+        }
+
+        if (material->doubleSided == 1){
+            glDisable(GL_CULL_FACE);
+        }else{
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+        }
+
+        material->send(pipeline->getProgram());
+    }
+
+    if (indexCount > 0){
+        drawElementsBaseVertex(pipeline, mode, startIndex, indexCount, baseVertex);
+    }else{
+        drawArrays(pipeline, mode, baseVertex, vertexCount);
+    }
+}
+
+void GltfPrimitive::update(const std::vector<float>& weights){
+    if (weights.empty()) return;
+    if (morphTargets.empty()) return;
+
+    const auto& layout = pipeline->getVertexLayout();
+    const auto& bufGroup = pipeline->getBufferGroup();
+
+    auto vertexMappedBuf = bufGroup->getMappedBuffer("b_vertex");
+    auto vertexBufPtr = (uint8_t*)vertexMappedBuf.begin();
+
+    auto positionPtr = (vec3*)(vertexBufPtr + positionOffset);
+    auto normalPtr = layout->has("a_normal") ? (vec3*)(vertexBufPtr + normalOffset) : nullptr;
+    auto tangentPtr = layout->has("a_tangent") ? (vec3*)(vertexBufPtr + tangentOffset) : nullptr;
+
+    for(size_t vertIndex = 0; vertIndex < vertexCount; ++vertIndex){
+        vec3 position{0};
+        vec3 normal{0};
+        vec3 tangent{0};
+        for(size_t i = 0; i < morphTargets.size(); ++i){
+            const auto& attributeMap = morphTargets[i];
+
+            auto posIter = attributeMap.find("a_position");
+            if (posIter != attributeMap.end()){
+                const vec3& p = *((const vec3*)posIter->second.data + vertIndex);
+                position += weights[i] * p;
+            }
+
+            auto normalIter = attributeMap.find("a_normal");
+            if (normalIter != attributeMap.end()){
+                const vec3& n = *((const vec3*)normalIter->second.data + vertIndex);
+                normal += weights[i] * n;
+            }
+
+            auto tangentIter = attributeMap.find("a_tangent");
+            if (tangentIter != attributeMap.end()){
+                const vec3& t = *((const vec3*)tangentIter->second.data + vertIndex);
+                tangent += weights[i] * t;
+            }
+        }
+
+        *(positionPtr + vertIndex) = *((vec3*)positionBuffer.data + vertIndex) + position;
+
+        if (normalPtr){
+            *(normalPtr + vertIndex) = *((vec3*)normalBuffer.data + vertIndex) + normal;
+        }
+
+        if (tangentPtr){
+            *(tangentPtr + vertIndex) = *((vec3*)tangentBuffer.data + vertIndex) + tangent;
+        }
+    }
+    vertexMappedBuf.end();
+}
+
+//---------------------------
+// mesh implemention
+GltfMeshPtr GltfMesh::create(){
+    auto ptr = new GltfMesh();
+    ptr->aabb.resize(8);
+    return GltfMeshPtr(ptr);
+}
+---
+
+--- mesh creator
+//--------------------
+// mesh creator
+struct GltfMeshCreator{
+    static std::vector<GltfMeshPtr> GltfMeshCreator::create(tinygltf::Model* model,
+        const std::vector<tow::Shader>& shaders, const std::vector<GltfMaterialPtr>& tfMaterials);
+};
+---
+
+--- mesh creator implemention
+//=============================
+// mesh creator implemention
+static const std::map<std::string, std::string> s_gltfAttribNameMap = {
+    {"POSITION", "a_position"},
+    {"NORMAL", "a_normal"},
+    {"TANGENT", "a_tangent"},
+    {"TEXCOORD_0", "a_texCoord[0]"},
+    {"TEXCOORD_1", "a_texCoord[1]"},
+    {"TEXCOORD_2", "a_texCoord[2]"},
+    {"TEXCOORD_3", "a_texCoord[3]"},
+    {"TEXCOORD_4", "a_texCoord[4]"},
+    {"TEXCOORD_5", "a_texCoord[5]"},
+    {"TEXCOORD_6", "a_texCoord[6]"},
+    {"TEXCOORD_7", "a_texCoord[7]"},
+    {"TEXCOORD_8", "a_texCoord[8]"},
+    {"TEXCOORD_9", "a_texCoord[9]"},
+    {"COLOR_0", "a_color"},
+    {"JOINTS_0", "a_joints"},
+    {"WEIGHTS_0", "a_weights"}
+};
+
+static const std::map<std::string, std::string> s_invGltfAttribNameMap = {
+    {"a_position", "POSITION"},
+    {"a_normal", "NORMAL"},
+    {"a_tangent", "TANGENT"},
+    {"a_texCoord[0]", "TEXCOORD_0"},
+    {"a_texCoord[1]", "TEXCOORD_1"},
+    {"a_texCoord[2]", "TEXCOORD_2"},
+    {"a_texCoord[3]", "TEXCOORD_3"},
+    {"a_texCoord[4]", "TEXCOORD_4"},
+    {"a_texCoord[5]", "TEXCOORD_5"},
+    {"a_texCoord[6]", "TEXCOORD_6"},
+    {"a_texCoord[7]", "TEXCOORD_7"},
+    {"a_texCoord[8]", "TEXCOORD_8"},
+    {"a_texCoord[9]", "TEXCOORD_9"},
+    {"a_color", "COLOR_0"},
+    {"a_joints", "JOINTS_0"},
+    {"a_weights", "WEIGHTS_0"}
+};
+
+/*
+mesh---primtives--------primtive A---vertex layout
+   |---morph targets             |---vertex buffer
+   |---weights                   |---index buffer
+                                 |---material
+*/
+struct CombinedLayout{
+    VertexLayoutPtr layout;
+    size_t byteVertex{0};
+    size_t vertexCount{0};
+    size_t byteIndex{0};
+    size_t indexCount{0};
+};
+
+std::vector<GltfMeshPtr> GltfMeshCreator::create(tinygltf::Model* model,
+    const std::vector<tow::Shader>& shaders, const std::vector<GltfMaterialPtr>& tfMaterials){
+
+    std::vector<std::vector<size_t>> meshPrimLayoutHashes;
+    std::map<size_t, CombinedLayout> primLayoutMap;
+    const auto& meshes = model->meshes;
+
+    //---------------------
+    // layout hashes
+    for(const auto& mesh : meshes){
+        std::vector<size_t> primLayoutHashes;
+        const auto& primitives = mesh.primitives;
+
+        for(const auto& primitive : primitives){
+            size_t attribOffset{0};
+            CombinedLayout cbLayout{VertexLayout::create()};
+
+            for(const auto& pr : primitive.attributes){
+                GltfBuffer tfBuffer(model, pr.second);
+
+                cbLayout.layout->add(s_gltfAttribNameMap.at(pr.first), {
+                        tfBuffer.componentType,
+                        tfBuffer.componentCount,
+                        tfBuffer.normalized,
+                        attribOffset
+                    });
+
+                cbLayout.byteVertex += tfBuffer.byteElement;
+                cbLayout.vertexCount = tfBuffer.count;
+
+                attribOffset += tfBuffer.getSize();
+            }
+
+            if (primitive.indices >= 0){
+                GltfBuffer tfBuffer(model, primitive.indices);
+                cbLayout.byteIndex = tfBuffer.byteElement;
+                cbLayout.indexCount = tfBuffer.count;
+            }
+
+            auto hash = std::hash<std::string>()(cbLayout.layout->getElementStr() + std::to_string(cbLayout.byteIndex));
+
+            auto it = primLayoutMap.insert({hash, cbLayout});
+            if (it.second == false){ // same vertex layout, need to combine together
+                auto& existedLayout = it.first->second;
+                auto& attributes = existedLayout.layout->getAttribMap();
+
+                for(auto& pr : attributes){
+                    pr.second.offset += cbLayout.layout->getAttrib(pr.first).offset;
+                }
+
+                existedLayout.vertexCount += cbLayout.vertexCount;
+                existedLayout.indexCount += cbLayout.indexCount;
+            }
+
+            primLayoutHashes.push_back(hash);
+        }
+
+        meshPrimLayoutHashes.push_back(primLayoutHashes);
+    }
+
+    //--------------------------------------
+    // create pipeline based on layout hash
+    std::map<size_t, GraphicPipelinePtr> primitivePipelineMap;
+    for(const auto& pr : primLayoutMap){
+        const auto& cbLayout = pr.second;
+        auto bufGroup = BufferGroup::create();
+
+        bufGroup->createBuffer("b_vertex", nullptr,
+            {GL_ARRAY_BUFFER, cbLayout.byteVertex, cbLayout.vertexCount, GL_STATIC_DRAW});
+
+        bufGroup->createBuffer("b_index", nullptr,
+            {GL_ELEMENT_ARRAY_BUFFER, cbLayout.byteIndex, cbLayout.indexCount, GL_STATIC_DRAW});
+
+        auto pipeline = GraphicPipeline::create(
+            {bufGroup, "b_vertex", cbLayout.indexCount ? "b_index" : ""}, cbLayout.layout, shaders);
+
+        primitivePipelineMap.insert({pr.first, pipeline});
+    }
+
+    //===================================
+    // create meshes
+    struct BufferByteCount{
+        size_t vertex{0};
+        size_t index{0};
+    };
+    std::map<size_t, BufferByteCount> bufByteCountMap;
+    std::vector<GltfMeshPtr> tfMeshes;
+
+    for(size_t meshIndex = 0; meshIndex < meshes.size(); ++meshIndex){
+        const auto& mesh = meshes[meshIndex];
+        const auto& primLayoutHashes = meshPrimLayoutHashes[meshIndex];
+        auto tfMesh = GltfMesh::create();
+
+        //----------------------
+        // set morph weights
+        tfMesh->weights.resize(mesh.weights.size());
+        for(size_t i = 0; i < mesh.weights.size(); ++i){
+            tfMesh->weights[i] = (float)mesh.weights[i];
+        }
+
+        //-------------------------
+        // set mesh primitives
+        for(size_t primIndex = 0; primIndex < mesh.primitives.size(); ++primIndex){
+            const auto& primitive = mesh.primitives[primIndex];
+            auto layoutHash = primLayoutHashes[primIndex];
+
+            // buffer byte count
+            auto& bufByteCount = bufByteCountMap[layoutHash];
+
+            // get pipeline
+            const auto& pipeline = primitivePipelineMap.at(layoutHash);
+            auto bufGroup = pipeline->getBufferGroup();
+            auto vertexLayout = pipeline->getVertexLayout();
+
+            //------------------------------
+            // fill vertex buffer
+            const auto& vertexItem = bufGroup->getItem("b_vertex");
+            auto vertexCopiedCount = bufByteCount.vertex / vertexItem.byteElement;
+            size_t vertexCount = 0;
+
+            for(const auto& pr : vertexLayout->getAttribMap()){
+                const auto& attrib = primitive.attributes.at(s_invGltfAttribNameMap.at(pr.first));
+
+                GltfBuffer tfBuffer(model, attrib);
+
+                auto offset = pr.second.offset + vertexCopiedCount * tfBuffer.byteElement;
+
+                if (tfBuffer.isPackedTightly()){
+                    bufGroup->write("b_vertex", tfBuffer.data, offset, tfBuffer.getSize());
+                    bufByteCount.vertex += tfBuffer.getSize();
+                }else{
+                    auto vertexMappedBuf = bufGroup->getMappedBuffer("b_vertex");
+                    vertexMappedBuf.begin();
+                    for(size_t i = 0; i < tfBuffer.count; ++i){
+                        vertexMappedBuf.write({tfBuffer.data + tfBuffer.byteStride * i,
+                            offset + tfBuffer.byteElement * i, tfBuffer.byteElement});
+                    }
+                    bufByteCount.vertex += tfBuffer.byteElement * tfBuffer.count;
+                    vertexMappedBuf.end();
+                }
+
+                vertexCount = tfBuffer.count;
+            }
+
+            //------------------------------
+            // fill index buffer
+            size_t indexCount = 0;
+            size_t startIndex = 0;
+
+            if (bufGroup->getItem("b_index").elementCount){
+                GltfBuffer tfIndexBuffer(model, primitive.indices);
+
+                const auto& indexItem = bufGroup->getItem("b_index");
+                auto indexCopiedCount = bufByteCount.index / indexItem.byteElement;
+
+                indexCount = tfIndexBuffer.count;
+                startIndex = indexCopiedCount;
+
+                if (tfIndexBuffer.isPackedTightly()){
+                    bufGroup->write("b_index", tfIndexBuffer.data, bufByteCount.index, tfIndexBuffer.getSize());
+                    bufByteCount.index += tfIndexBuffer.getSize();
+                }else{
+                    auto indexMappedBuf = bufGroup->getMappedBuffer("b_index");
+
+                    indexMappedBuf.begin();
+                    for(size_t i = 0; i < tfIndexBuffer.count; ++i){
+                        indexMappedBuf.write({tfIndexBuffer.data + tfIndexBuffer.byteStride * i,
+                            bufByteCount.index + tfIndexBuffer.byteElement * i, tfIndexBuffer.byteElement});
+                    }
+                    bufByteCount.index += tfIndexBuffer.byteElement * tfIndexBuffer.count;
+
+                    indexMappedBuf.end();
+                }
+            }
+
+            //----------------------
+            // create primitive
+            GltfPrimitive tfPrimitive;
+            tfPrimitive.pipeline = pipeline;
+            tfPrimitive.mode = primitive.mode;
+            tfPrimitive.baseVertex = vertexCopiedCount;
+            tfPrimitive.startIndex = startIndex;
+            tfPrimitive.vertexCount = vertexCount;
+            tfPrimitive.indexCount = indexCount;
+
+            if (primitive.material >= 0){
+                tfPrimitive.material = tfMaterials.at(primitive.material);
+            }
+
+            tfPrimitive.positionBuffer = GltfBuffer(model, primitive.attributes.at("POSITION"));
+            tfPrimitive.positionOffset = vertexLayout->getAttrib("a_position").offset +
+                vertexCopiedCount * vertexLayout->getByteElement("a_position");
+
+            if (vertexLayout->has("a_normal")){
+                tfPrimitive.normalBuffer = GltfBuffer(model, primitive.attributes.at("NORMAL"));
+                tfPrimitive.normalOffset = vertexLayout->getAttrib("a_normal").offset +
+                    vertexCopiedCount * vertexLayout->getByteElement("a_normal");
+            }
+
+            if (vertexLayout->has("a_tangent")){
+                tfPrimitive.tangentBuffer = GltfBuffer(model, primitive.attributes.at("TANGENT"));
+                tfPrimitive.tangentOffset = vertexLayout->getAttrib("a_tangent").offset +
+                    vertexCopiedCount * vertexLayout->getByteElement("a_tangent");
+            }
+
+            // set morph targets
+            for(const auto& targetMap : primitive.targets){
+                std::map<std::string, GltfBuffer> tfTargetMap;
+                for(const auto& pr : targetMap){
+                    GltfBuffer tfBuffer(model, pr.second);
+                    assert(tfBuffer.componentType == GL_FLOAT);
+                    assert(tfBuffer.componentCount == 3);
+
+                    tfTargetMap.insert({s_gltfAttribNameMap.at(pr.first), tfBuffer});
+                }
+                tfPrimitive.morphTargets.push_back(tfTargetMap);
+            }
+
+            //--------------------
+            // push primitive
+            tfMesh->primitives.push_back(tfPrimitive);
+        }
+
+        //---------------
+        // push mesh
+        tfMeshes.push_back(tfMesh);
+    }
+
+    return tfMeshes;
+}
+---
+
+
+--- skin
+//==========================
+// skin
+class GltfSkin;
+using GltfSkinPtr = tow::ResourcePtr<GltfSkin>;
+
+//----------------==
+// joint
+class GltfJoint{
+    friend struct GltfSkinCreator;
+    friend struct GltfNodeCreator;
+    friend class GltfNode;
+    friend class GltfModel;
+
+private:
+    GltfJoint(size_t idx) : index(idx) {}
+
+public:
+    void *operator new(size_t size) { return _mm_malloc(size, 16); }
+    void operator delete(void* ptr) { _mm_free(ptr); }
+
+public:
+    static tow::ResourcePtr<GltfJoint> create(size_t idx);
+
+public:
+    auto getIndex() const { return index; }
+    auto getNodeIndex() const { return nodeIndex; }
+    const auto& getInvBindMat() const { return invBindMat; }
+    const auto& getJointMat() const { return jointMat; }
+
+private:
+    size_t index{(size_t)-1};
+    size_t nodeIndex{(size_t)-1};
+    glm::mat4 jointMat{1};
+    glm::mat4 invBindMat{1};
+
+};
+using GltfJointPtr = tow::ResourcePtr<GltfJoint>;
+
+//-----------------
+// skin
+class GltfSkin{
+    friend struct GltfSkinCreator;
+    friend struct GltfNodeCreator;
+    friend class GltfModel;
+
+public:
+    static const size_t kMaxNumJoints = 512;
+
+private:
+    GltfSkin(size_t idx) : index(idx) {}
+
+public:
+    static tow::ResourcePtr<GltfSkin> create(size_t idx);
+
+public:
+    auto getIndex() const { return index; }
+    auto getNumJoints() const { return joints.size(); }
+    const auto& getJoints() const { return joints; }
+    auto getRootNodeIndex() const { return rootNodeIndex; }
+    auto getAttachedNodeIndex() const { return attachedNodeIndex; }
+    auto getJointBufferBinding() const { return jointBufBinding; }
+
+public:
+    void update();
+
+private:
+    size_t index{0};
+    size_t attachedNodeIndex{(size_t)-1};
+    size_t rootNodeIndex{(size_t)-1};
+    std::vector<GltfJointPtr> joints;
+    tow::BufferBindingPtr jointBufBinding;
+    std::vector<tow::BufferGroup::Block> jointBlocks;
+};
+---
+
+--- skin implemention
+//=============================
+// skin implemention
+
+//-----------------------
+// joint implemention
+tow::ResourcePtr<GltfJoint> GltfJoint::create(size_t idx){
+    return tow::ResourcePtr<GltfJoint>(new GltfJoint(idx));
+}
+
+//-----------------------
+// skin implemention
+ResourcePtr<GltfSkin> GltfSkin::create(size_t idx){
+    return ResourcePtr<GltfSkin>(new GltfSkin(idx));
+}
+
+void GltfSkin::update(){
+    jointBufBinding->getBufferGroup()->write("b_joints", jointBlocks);
+}
+---
+
+--- skin creator
+//---------------
+// skin creator
+struct GltfSkinCreator{
+    static std::vector<GltfSkinPtr> create(tinygltf::Model* model);
+};
+---
+
+--- skin creator implemention
+//----------------------------------
+// skin creator implemention
+std::vector<GltfSkinPtr> GltfSkinCreator::create(tinygltf::Model* model){
+    std::vector<GltfSkinPtr> tfSkins;
+
+    std::map<int, GltfJointPtr> jointMap;
+    for(const auto& skin : model->skins){
+        int index = 0;
+        for(auto jointIndex : skin.joints){
+            jointMap.insert({jointIndex, GltfJoint::create(index++)});
+        }
+    }
+
+    for(size_t skinIndex = 0; skinIndex < model->skins.size(); ++skinIndex){
+        const auto& skin = model->skins.at(skinIndex);
+
+        auto tfSkin = GltfSkin::create(skinIndex);
+        tfSkins.push_back(tfSkin);
+
+        for(size_t jointIndex = 0; jointIndex < skin.joints.size(); ++jointIndex){
+            auto tfJoint = jointMap.at(skin.joints.at(jointIndex));
+            tfJoint->nodeIndex = skin.joints.at(jointIndex);
+
+            if (skin.inverseBindMatrices >= 0){
+                GltfBuffer tfBuffer(model, skin.inverseBindMatrices);
+                assert(tfBuffer.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT);
+                assert(tfBuffer.componentCount == 16);
+                memcpy(&tfJoint->invBindMat, (float*)tfBuffer.data + jointIndex * 16, 16 * sizeof(float));
+            }
+
+            tfSkin->joints.push_back(tfJoint);
+        }
+
+        //--------------------------------
+        // create gl buffer for joints
+        auto numJoints = skin.joints.size();
+        assert(numJoints <= GltfSkin::kMaxNumJoints);
+
+        auto bufGroup = BufferGroup::create();
+        bufGroup->createBuffer("b_joints", nullptr, {GL_ARRAY_BUFFER, sizeof(mat4), numJoints, GL_DYNAMIC_DRAW});
+
+        auto bufBinding = BufferBinding::create(GL_UNIFORM_BUFFER);
+        bufBinding->bind(bufGroup, "b_joints");
+
+        tfSkin->jointBufBinding = bufBinding;
+
+        size_t offset{0};
+        for(const auto& tfJoint : tfSkin->joints){
+            tfSkin->jointBlocks.push_back({&tfJoint->getJointMat(), offset, sizeof(mat4)});
+            offset += sizeof(mat4);
+        }
+    }
+
+    return tfSkins;
+}
+---
+
+--- animation
+//=========================
+// animation
+
+//---------------
+// sampler io
+class GltfSamplerIO{
+public:
+    const float* getValue(size_t index) const{
+        assert(index < count);
+        return data + index * componentCount;
+    }
+
+public:
+    const float* data{nullptr};
+    size_t componentCount{0};
+    size_t count{0};
+};
+
+//-----------------
+// sampler
+class GltfSampler{
+public:
+    enum InterpolationType{
+        STEP = 0,
+        LINEAR,
+        CUBICSPLINE
+    };
+    enum TargetPathType{
+        TRANSLATION = 0,
+        ROTATION,
+        SCALE,
+        WEIGHTS
+    };
+public:
+    static tow::ResourcePtr<GltfSampler> create();
+
+public:
+    void sample(float curTime, TargetPathType targetPath);
+
+    void reset();
+
+    float getTimeLength() const { return *input.getValue(input.count - 1); }
+
+    const auto& getTsmMat() const { return tsmMat; }
+
+    const auto& getWeights() const { return weights; }
+
+private:
+    size_t findPreviousIndex(float curTime);
+
+    void cubicSplineInterpolation(float factor, size_t nextIndex, TargetPathType targetPath);
+
+public:
+    GltfSamplerIO input;
+    GltfSamplerIO output;
+    InterpolationType interpolation;
+    size_t previousIndex{0};
+    glm::mat4 tsmMat;
+    std::vector<float> weights;
+};
+
+//----------------
+// channel
+class GltfChannel{
+public:
+    void update(float dt);
+
+    bool isPlayDone() const { return isDone; }
+
+    void reset();
+
+public:
+    GltfSampler sampler;
+    GltfNodePtr targetNode;
+    GltfSampler::TargetPathType targetPath;
+
+    float curTime{0};
+    bool isDone{false};
+};
+
+//--------------------
+// animation
+class GltfAnimation{
+    friend struct GltfAnimationCreator;
+
+public:
+    void update(float dt);
+    bool isPlayDone() const;
+    void reset();
+
+public:
+    const auto& getName() const { return name; }
+    const auto& getChannels() const { return channels; }
+
+private:
+    std::string name;
+    std::vector<GltfChannel> channels;
+};
+
+//----------------------
+// animation creator
+struct GltfAnimationCreator{
+    static std::vector<GltfAnimation> create(tinygltf::Model* model,
+    std::vector<GltfNodePtr>& tfNodes);
+};
+---
+
+--- animation implemention
+//=========================
+// animation implemention
+
+//-----------------------
+// sampler implemention
+void GltfSampler::reset(){
+    previousIndex = 0;
+}
+
+size_t GltfSampler::findPreviousIndex(float curTime){
+    for(size_t i = previousIndex + 1; i < input.count; ++i){
+        if (curTime < input.data[i]){
+            return i - 1;
+        }
+    }
+    return 0;
+}
+
+void GltfSampler::cubicSplineInterpolation(float factor, size_t nextIndex, TargetPathType targetPath){
+    const float* prePtr{nullptr};
+    const float* nextPtr{nullptr};
+    float t = factor;
+    float t2 = t * t;
+    float t3 = t * t2;
+    float length = input.data[nextIndex] - input.data[previousIndex];
+
+    // inTangent---point---outTangent
+    if (targetPath == TargetPathType::TRANSLATION){
+        prePtr = output.data + previousIndex * (3 + 3 + 3);
+        nextPtr = output.data + nextIndex * (3 + 3 + 3);
+
+        vec3 preOutTangent(prePtr[6], prePtr[7], prePtr[8]);
+        preOutTangent *= length;
+
+        vec3 prePoint(prePtr[3], prePtr[4], prePtr[5]);
+
+        vec3 nextInTangent(nextPtr[0], nextPtr[1], nextPtr[2]);
+        nextInTangent *= length;
+
+        vec3 nextPoint(nextPtr[3], nextPtr[4], nextPtr[5]);
+
+        vec3 p = (2 * t3 - 3 * t2 + 1) * prePoint + (t3 - 2 * t2 + t) * preOutTangent
+            + (-2 * t3 + 3 * t2) * nextPoint + (t3 - t2) * nextInTangent;
+
+        tsmMat = translate(mat4(1), p);
+
+    }else if (targetPath == TargetPathType::ROTATION){
+        prePtr = output.data + previousIndex * (4 + 4 + 4);
+        nextPtr = output.data + nextIndex * (4 + 4 + 4);
+
+        vec4 preOutTangent(prePtr[8], prePtr[9], prePtr[10], prePtr[11]);
+        preOutTangent *= length;
+
+        vec4 prePoint(prePtr[4], prePtr[5], prePtr[6], prePtr[7]);
+
+        vec4 nextInTangent(nextPtr[0], nextPtr[1], nextPtr[2], nextPtr[3]);
+        nextInTangent *= length;
+
+        vec4 nextPoint(nextPtr[4], nextPtr[5], nextPtr[6], nextPtr[7]);
+
+        vec4 p = (2 * t3 - 3 * t2 + 1) * prePoint + (t3 - 2 * t2 + t) * preOutTangent
+            + (-2 * t3 + 3 * t2) * nextPoint + (t3 - t2) * nextInTangent;
+
+        p = normalize(p);
+
+        tsmMat = toMat4(quat(p.w, p.x, p.y, p.z));
+
+    }else if (targetPath == TargetPathType::SCALE){
+        prePtr = output.data + previousIndex * (3 + 3 + 3);
+        nextPtr = output.data + nextIndex * (3 + 3 + 3);
+
+        vec3 preOutTangent(prePtr[6], prePtr[7], prePtr[8]);
+        preOutTangent *= length;
+
+        vec3 prePoint(prePtr[3], prePtr[4], prePtr[5]);
+
+        vec3 nextInTangent(nextPtr[0], nextPtr[1], nextPtr[2]);
+        nextInTangent *= length;
+
+        vec3 nextPoint(nextPtr[3], nextPtr[4], nextPtr[5]);
+
+        vec3 p = (2 * t3 - 3 * t2 + 1) * prePoint + (t3 - 2 * t2 + t) * preOutTangent
+            + (-2 * t3 + 3 * t2) * nextPoint + (t3 - t2) * nextInTangent;
+
+        tsmMat = scale(mat4(1), p);
+    }
+}
+
+void GltfSampler::sample(float curTime, TargetPathType targetPath){
+    float factor{0};
+    size_t nextIndex{0};
+
+    previousIndex = findPreviousIndex(curTime);
+    nextIndex = previousIndex + 1;
+
+    if (nextIndex < input.count){
+        if (interpolation == InterpolationType::STEP){
+            factor = 0;
+        }else if (interpolation == InterpolationType::LINEAR || interpolation == InterpolationType::CUBICSPLINE){
+            factor = (curTime - input.data[previousIndex]) / (input.data[nextIndex] - input.data[previousIndex]);
+            factor = clamp(factor, 0.0f, 1.0f);
+        }
+    }else{
+        nextIndex = previousIndex;
+    }
+
+    if (interpolation == InterpolationType::CUBICSPLINE){
+        cubicSplineInterpolation(factor, nextIndex, targetPath);
+    }else{
+        auto prePtr = output.data + previousIndex * output.componentCount;
+        auto nextPtr = output.data + nextIndex * output.componentCount;
+
+        if (targetPath == TargetPathType::TRANSLATION){
+            vec3 prePos(prePtr[0], prePtr[1], prePtr[2]);
+            vec3 nextPos(nextPtr[0], nextPtr[1], nextPtr[2]);
+            vec3 pos = lerp(prePos, nextPos, factor);
+
+            tsmMat = translate(mat4(1), pos);
+
+        }else if(targetPath == TargetPathType::ROTATION){
+            quat preQuat(prePtr[3], prePtr[0], prePtr[1], prePtr[2]);
+            quat nextQuat(nextPtr[3], nextPtr[0], nextPtr[1], nextPtr[2]);
+            quat quat = slerp(preQuat, nextQuat, factor);
+
+            tsmMat = toMat4(quat);
+
+        }else if(targetPath == TargetPathType::SCALE){
+            vec3 preScale(prePtr[0], prePtr[1], prePtr[2]);
+            vec3 nextScale(nextPtr[0], nextPtr[1], nextPtr[2]);
+            vec3 s = lerp(preScale, nextScale, factor);
+
+            tsmMat = scale(mat4(1), s);
+
+        }else if (targetPath == TargetPathType::WEIGHTS){
+            size_t numWeights = output.count / input.count;
+
+            prePtr = output.data + previousIndex * numWeights;
+            nextPtr = output.data + nextIndex * numWeights;
+
+            weights.resize(numWeights, 0);
+            for(size_t i = 0; i < numWeights; ++i){
+                weights[i] = lerp(prePtr[i], nextPtr[i], factor);
+            }
+        }
+    }
+}
+
+//----------------------
+// channel implemention
+void GltfChannel::update(float dt){
+    if (isDone) return;
+
+    sampler.sample(curTime, targetPath);
+
+    if (targetPath == GltfSampler::TargetPathType::TRANSLATION){
+        targetNode->translationMat = sampler.getTsmMat();
+    }else if(targetPath == GltfSampler::TargetPathType::ROTATION){
+        targetNode->rotationMat = sampler.getTsmMat();
+    }else if (targetPath == GltfSampler::TargetPathType::SCALE){
+        targetNode->scaleMat = sampler.getTsmMat();
+    }else if (targetPath == GltfSampler::TargetPathType::WEIGHTS){
+        targetNode->mesh->weights = sampler.getWeights();
+    }
+
+    curTime += dt;
+    if (curTime > sampler.getTimeLength()){
+        curTime = sampler.getTimeLength();
+        isDone = true;
+    }
+}
+
+void GltfChannel::reset(){
+    curTime = 0;
+    isDone = false;
+    sampler.reset();
+}
+
+//------------------------
+// animation
+bool GltfAnimation::isPlayDone() const{
+    for(const auto& channel : channels){
+        if (!channel.isPlayDone()){
+            return false;
+        }
+    }
+    return true;
+}
+
+void GltfAnimation::update(float dt){
+    for(auto& channel : channels){
+        channel.update(dt);
+    }
+
+    if (isPlayDone()){
+        for(auto& channel : channels){
+            channel.reset();
+        }
+    }
+}
+
+void GltfAnimation::reset(){
+    for(auto& channel : channels){
+        channel.targetNode->resetMatrices();
+    }
+}
+
+//-----------------------
+// animation creator
+static GltfSamplerIO getSamplerIO(tinygltf::Model* model, size_t accessorIndex){
+    GltfBuffer tfBuffer(model, accessorIndex);
+    assert(tfBuffer.byteStride == tfBuffer.byteElement);
+    assert(tfBuffer.componentType == GL_FLOAT);
+
+    return {(float*)tfBuffer.data, tfBuffer.componentCount, tfBuffer.count};
+}
+
+static std::map<std::string, GltfSampler::InterpolationType> s_interpolationMap = {
+    {"STEP", GltfSampler::InterpolationType::STEP},
+    {"LINEAR", GltfSampler::InterpolationType::LINEAR},
+    {"CUBICSPLINE", GltfSampler::InterpolationType::CUBICSPLINE},
+};
+
+static std::map<std::string, GltfSampler::TargetPathType> s_targetPathMap = {
+    {"translation", GltfSampler::TargetPathType::TRANSLATION},
+    {"rotation", GltfSampler::TargetPathType::ROTATION},
+    {"scale", GltfSampler::TargetPathType::SCALE},
+    {"weights", GltfSampler::TargetPathType::WEIGHTS},
+};
+
+std::vector<GltfAnimation> GltfAnimationCreator::create(tinygltf::Model* model,
+    std::vector<GltfNodePtr>& tfNodes){
+
+    std::vector<GltfAnimation> tfAnimations;
+    tfAnimations.reserve(model->animations.size());
+
+    for(const auto& animation : model->animations){
+        std::vector<GltfSampler> tfSamplers;
+        for(const auto& sampler : animation.samplers){
+            tfSamplers.push_back({
+                getSamplerIO(model, sampler.input),
+                getSamplerIO(model, sampler.output),
+                s_interpolationMap.at(sampler.interpolation)
+            });
+        }
+
+        GltfAnimation tfAnimation;
+        for(const auto& channel : animation.channels){
+            tfAnimation.channels.push_back({
+                tfSamplers.at(channel.sampler),
+                tfNodes.at(channel.target_node),
+                s_targetPathMap.at(channel.target_path)
+            });
+        }
+
+        tfAnimation.name = animation.name;
+        if (tfAnimation.name.empty()){
+            strFormat(tfAnimation.name, "Animation%u", tfAnimations.size());
+        }
+        tfAnimations.push_back(tfAnimation);
+
+    }
+
+    return tfAnimations;
+}
+---
+
+--- node
+//-----------------------------
+// node
+class GltfNode{
+    friend struct GltfNodeCreator;
+    friend class GltfChannel;
+    friend class GltfModel;
+    friend class GltfAnimation;
+
+private:
+    GltfNode(){}
+
+public:
+    static GltfNodePtr create();
+
+public:
+    void *operator new(size_t count){ return _mm_malloc(count, 16); }
+    void operator delete(void *ptr){ _mm_free(ptr); }
+
+private:
+    void visit(const glm::mat4& parentMat);
+
+public:
+    auto getIndex() const { return index; }
+    const auto& getGlobalTsmMat() const { return globalTsmMat; }
+
+    const auto& getMesh() const { return mesh; }
+    const auto& getCamera() const { return camera; }
+    const auto& getSkin() const { return skin; }
+    const auto& getJoint() const { return joint; }
+
+    auto getParentNodeIndex() const { return parentNodeIndex; }
+    const auto& getChildren() const  { return children; }
+
+public:
+    void resetMatrices();
+
+private:
+    size_t index{(size_t)-1};
+
+    GltfMeshPtr mesh;
+    GltfCameraPtr camera;
+    GltfSkinPtr skin;
+    GltfJointPtr joint;
+
+    glm::mat4 globalTsmMat{1};
+
+    glm::mat4 translationMat{1};
+    glm::mat4 rotationMat{1};
+    glm::mat4 scaleMat{1};
+
+    glm::mat4 initTranslationMat{1};
+    glm::mat4 initRotationMat{1};
+    glm::mat4 initScaleMat{1};
+
+    size_t parentNodeIndex{(size_t)-1};
+    std::vector<GltfNodePtr> children;
+};
+---
+
+--- node implemention
+//--------------------------
+// node implemention
+tow::ResourcePtr<GltfNode> GltfNode::create(){
+    return tow::ResourcePtr<GltfNode>(new GltfNode());
+}
+
+void GltfNode::visit(const mat4& parentMat){
+    globalTsmMat = parentMat * translationMat * rotationMat * scaleMat;
+
+    if (joint){
+        joint->jointMat = globalTsmMat * joint->invBindMat;
+    }
+
+    for(auto child : children){
+        child->visit(globalTsmMat);
+    }
+}
+
+void GltfNode::resetMatrices(){
+    scaleMat = initScaleMat;
+    rotationMat = initRotationMat;
+    translationMat = initTranslationMat;
+}
+---
+
+--- node creator
+//-------------------
+// node creator
+struct GltfNodeCreator{
+    static std::vector<GltfNodePtr> create(tinygltf::Model* model,
+        const std::vector<GltfMeshPtr>& tfMeshes, const std::vector<GltfSkinPtr>& tfSkins,
+        const std::vector<GltfCameraPtr>& tfCameras);
+
+    static void buildNodeTree(tinygltf::Model* model, size_t nodeIndex, const glm::mat4& parentMat,
+        const std::vector<GltfNodePtr>& tfNodes);
+};
+---
+
+--- node creator implemention
+//=======================================
+// node creator implemention
+void GltfNodeCreator::buildNodeTree(tinygltf::Model* model, size_t nodeIndex, const mat4& parentMat,
+    const std::vector<GltfNodePtr>& tfNodes){
+
+    const auto& node = model->nodes.at(nodeIndex);
+
+    vec3 nodeScale{1};
+    quat nodeOrientation(1.0f, 0.0f, 0.0f, 0.0f);
+    vec3 nodeTranslation{0};
+
+    if (!node.matrix.empty()){
+        const auto &m = node.matrix;
+        mat4 modelMat(vec4(m[0], m[1], m[2], m[3]),   vec4(m[4], m[5], m[6], m[7]),
+                      vec4(m[8], m[9], m[10], m[11]), vec4(m[12], m[13], m[14], m[15]));
+
+        vec3 skew;
+        vec4 persp;
+        decompose(modelMat, nodeScale, nodeOrientation, nodeTranslation, skew, persp);
+
+    }else{
+        if (!node.translation.empty()){
+            const auto &trans = node.translation;
+            nodeTranslation = vec3(trans[0], trans[1], trans[2]);
+        }
+        if (!node.rotation.empty()){
+            const auto &rot = node.rotation;
+            nodeOrientation = quat((float)rot[3], (float)rot[0], (float)rot[1], (float)rot[2]);
+        }
+        if (!node.scale.empty()){
+            const auto &s = node.scale;
+            nodeScale = vec3(s[0], s[1], s[2]);
+        }
+    }
+
+    auto tfNode = tfNodes.at(nodeIndex);
+    tfNode->translationMat = translate(mat4(1), nodeTranslation);
+    tfNode->rotationMat = toMat4(nodeOrientation);
+    tfNode->scaleMat = scale(mat4(1), nodeScale);
+
+    tfNode->initTranslationMat = tfNode->translationMat;
+    tfNode->initRotationMat = tfNode->rotationMat;
+    tfNode->initScaleMat = tfNode->scaleMat;
+
+    tfNode->globalTsmMat = parentMat * tfNode->translationMat *
+        tfNode->rotationMat * tfNode->scaleMat;
+
+    for(auto index : node.children){
+        auto childNode = tfNodes.at(index);
+        assert(childNode->parentNodeIndex == -1);
+
+        childNode->parentNodeIndex = tfNode->getIndex();
+
+        tfNode->children.push_back(childNode);
+
+        buildNodeTree(model, index, tfNode->globalTsmMat, tfNodes);
+    }
+}
+
+std::vector<GltfNodePtr> GltfNodeCreator::create(tinygltf::Model* model,
+    const std::vector<GltfMeshPtr>& tfMeshes, const std::vector<GltfSkinPtr>& tfSkins,
+    const std::vector<GltfCameraPtr>& tfCameras){
+
+    std::vector<GltfNodePtr> tfNodes;
+
+    for(size_t index = 0; index < model->nodes.size(); ++index){
+        const auto& node = model->nodes.at(index);
+
+        auto tfNode = GltfNode::create();
+
+        tfNode->index = index;
+
+        if (node.mesh >= 0){
+            tfNode->mesh = tfMeshes.at(node.mesh);
+            tfNode->mesh->nodeIndex = index;//use index to avoid cyclic reference
+        }
+        if (node.camera >= 0){
+            tfNode->camera = tfCameras.at(node.camera);
+            tfNode->camera->nodeIndex = index;
+        }
+        if (node.skin >= 0){
+            tfNode->skin = tfSkins.at(node.skin);
+            tfNode->skin->attachedNodeIndex = index;
+        }
+
+        tfNodes.push_back(tfNode);
+    }
+
+    for(const auto& scene : model->scenes){
+       for(auto rootNodeIndex : scene.nodes){
+           buildNodeTree(model, rootNodeIndex, mat4(1), tfNodes);
+       }
+    }
+
+    //----------------------------
+    // skin joints
+    for(size_t i = 0; i < model->skins.size(); ++i){
+        const auto& skin = model->skins.at(i);
+        auto& tfSkin = tfSkins.at(i);
+
+        // find joint root index
+        auto tfNode = tfNodes.at(skin.joints.at(0));
+        while(tfNode->parentNodeIndex != -1){
+            tfNode = tfNodes.at(tfNode->parentNodeIndex);
+        }
+        tfSkin->rootNodeIndex = tfNode->getIndex();
+
+        // assign joint to node
+        for(size_t j = 0; j < skin.joints.size(); ++j){
+            auto nodeIndex = skin.joints.at(j);
+            auto tfJoint = tfSkin->joints.at(j);
+
+            tfNodes.at(nodeIndex)->joint = tfJoint;
+            tfJoint->nodeIndex = nodeIndex;
+        }
+    }
+
+    return tfNodes;
+}
+---
+
+--- asset info
+//--------------------
+// asset
+struct GltfAssetInfo{
+    std::string version;
+    std::string generator;
+    std::string minVersion;
+    std::string copyright;
+    std::vector<std::string> extensions;
+    std::map<std::string, std::string> extras;
+};
+---
+
+--- model
+//------------
+// model
+class GltfModel{
+private:
+    GltfModel(tinygltf::Model* m, const std::vector<tow::Shader>& shaders);
+
+public:
+    ~GltfModel();
+
+public:
+    static tow::ResourcePtr<GltfModel> create(tinygltf::Model* m, const std::vector<tow::Shader>& shaders);
+
+public:
+    void update(float dt, CameraPtr camera, size_t aniIndex = 0);
+
+public:
+    const auto getModel() const { return model; }
+
+    const auto& getMaterials() const { return tfMaterials; }
+    const auto& getMeshes() const{ return tfMeshes; }
+    const auto& getCameras() const{ return tfCameras; }
+    const auto& getSkins() const{ return tfSkins; }
+    const auto& getNodes() const{ return tfNodes; }
+    const auto& getAnimations() const{ return tfAnimations; }
+
+    const auto& getNodesContainMesh() const { return tfNodesContainMesh; }
+
+    const auto& getPrograms() const { return tfPrograms; }
+    const auto& getPipelines() const { return tfPipelines; }
+
+    const auto& getMinPosition() const { return tfMinPos; }
+    const auto& getMaxPosition() const { return tfMaxPos; }
+    const auto& getCenterPosition() const { return tfCenterPos; }
+    const auto& getAABB() const { return tfAABB; }
+
+    const auto& getAssetInfo() const{ return tfAssetInfo; }
+
+    auto getNumPrimitives() const { return numPrimitives; }
+    auto getNumVertices() const { return numVertices; }
+    auto getNumTextures() const { return numTextures; }
+
+    // some convenient methods
+    auto getNode(size_t index) const { return getNodes().at(index); }
+    auto getGlobalTsmMat(size_t index) const { return getNode(index)->getGlobalTsmMat(); }
+
+private:
+    tinygltf::Model* model{nullptr};
+
+    // data members of model
+    std::vector<GltfMaterialPtr> tfMaterials;
+    std::vector<GltfMeshPtr> tfMeshes;
+    std::vector<GltfCameraPtr> tfCameras;
+    std::vector<GltfSkinPtr> tfSkins;
+    std::vector<GltfNodePtr> tfNodes;
+    std::vector<GltfAnimation> tfAnimations;
+
+    // filtered nodes
+    std::vector<GltfNodePtr> tfRootNodes;
+    std::vector<GltfNodePtr> tfNodesContainMesh;
+    std::vector<GltfMeshPtr> tfMeshesContainMorphTarget;
+
+    // programs and pipelines from primitive
+    std::vector<tow::ProgramPtr> tfPrograms;
+    std::vector<tow::GraphicPipelinePtr> tfPipelines;
+
+    // model bounding box
+    glm::vec3 tfMinPos;
+    glm::vec3 tfMaxPos;
+    glm::vec3 tfCenterPos;
+    std::vector<glm::vec3> tfAABB;
+
+    //--------
+    // misc
+    GltfAssetInfo tfAssetInfo;
+
+    size_t numPrimitives{0};
+    size_t numVertices{0};
+    size_t numTextures{0};
+
+    size_t lastAniIndex{(size_t)-1};
+};
+using GltfModelPtr = tow::ResourcePtr<GltfModel>;
+---
+
+--- model implemention
+//================================
+// model implemention
+tow::ResourcePtr<GltfModel> GltfModel::create(tinygltf::Model* m, const std::vector<tow::Shader>& shaders){
+    return tow::ResourcePtr<GltfModel>(new GltfModel(m, shaders));
+}
+
+GltfModel::~GltfModel(){}
+
+GltfModel::GltfModel(tinygltf::Model* m, const std::vector<tow::Shader>& shaders) {
+    model = m;
+
+    //-------------------
+    // asset information
+    const auto& asset = model->asset;
+    tfAssetInfo.version = std::move(asset.version);
+    tfAssetInfo.generator = std::move(asset.generator);
+    tfAssetInfo.minVersion = std::move(asset.minVersion);
+    tfAssetInfo.copyright = std::move(asset.copyright);
+
+    // extensions
+    for(auto pr : model->asset.extensions){
+        tfAssetInfo.extensions.push_back(pr.first);
+    }
+
+    // extras
+    const auto& keys = asset.extras.Keys();
+    for(const auto& key : keys){
+        const auto& value = asset.extras.Get(key);
+        if (value.IsString()){
+            tfAssetInfo.extras.insert({key, value.Get<std::string>()});
+        }
+    }
+
+    //-------------------------
+    // data members of model
+    tfMaterials = GltfMaterialCreator::create(model);
+    tfMeshes = GltfMeshCreator::create(model, shaders, tfMaterials);
+    tfCameras = GltfCameraCreator::create(model);
+    tfSkins = GltfSkinCreator::create(model);
+    tfNodes = GltfNodeCreator::create(model, tfMeshes, tfSkins, tfCameras);
+    tfAnimations = GltfAnimationCreator::create(model, tfNodes);
+
+    for(const auto& tfNode : tfNodes){
+        if (tfNode->parentNodeIndex == -1){
+            tfRootNodes.push_back(tfNode);
+        }
+    }
+    for(auto tfNode : tfNodes){
+        if (tfNode->mesh){
+            tfNodesContainMesh.push_back(tfNode);
+        }
+    }
+    for(const auto& tfNode: tfNodesContainMesh){
+        if (tfNode->mesh->getWeights().size() > 0){
+            tfMeshesContainMorphTarget.push_back(tfNode->mesh);
+        }
+    }
+
+    std::map<size_t, GraphicPipelinePtr> pipelineMap;
+    for(auto tfNode : tfNodesContainMesh){
+        for(const auto& primitive : tfNode->mesh->getPrimitives()){
+            auto program = primitive.getPipeline()->getProgram();
+            auto hashStr = program->getVertexLayout()->getElementStr() +
+                            std::to_string(primitive.getPipeline()->getIndexType());
+
+            auto key = std::hash<std::string>()(hashStr);
+
+            pipelineMap.insert({key, primitive.getPipeline()});
+
+            // stats
+            numPrimitives++;
+            numVertices += primitive.getVertexCount();
+
+            // check data completeness
+            auto tfMaterial = primitive.getMaterial();
+            if (tfMaterial){
+                auto layout = program->getVertexLayout();
+                if (tfMaterial->texGroup->has("s_normal")){
+                    //assert(layout->has("a_normal") && layout->has("a_tangent"));
+                }
+            }
+        }
+    }
+    for(const auto &pr : pipelineMap){
+        tfPrograms.push_back(pr.second->getProgram());
+        tfPipelines.push_back(pr.second);
+    }
+
+    for(const auto& tfMaterial : tfMaterials){
+        numTextures += tfMaterial->texGroup->getStorageMap().size();
+    }
+
+    //-----------------------
+    // compute mesh aabb
+    for(auto& tfNode : tfNodesContainMesh){
+        auto tfMesh = tfNode->mesh;
+
+        tfMesh->minPos = vec3{std::numeric_limits<float>::max()};
+        tfMesh->maxPos = vec3{std::numeric_limits<float>::min()};
+
+        for(const auto& tfPrimitive : tfMesh->getPrimitives()){
+            const auto& tfBuffer = tfPrimitive.getPositionBuffer();
+            if (tfBuffer.minValues){
+                vec3 minValues{(float)tfBuffer.minValues[0], (float)tfBuffer.minValues[1], (float)tfBuffer.minValues[2]};
+                minValues = vec3{tfNode->getGlobalTsmMat() * vec4(minValues, 1)};
+
+                if (minValues.x < tfMesh->minPos.x) { tfMesh->minPos.x = minValues.x; }
+                if (minValues.y < tfMesh->minPos.y) { tfMesh->minPos.y = minValues.y; }
+                if (minValues.z < tfMesh->minPos.z) { tfMesh->minPos.z = minValues.z; }
+            }
+            if (tfBuffer.maxValues){
+                vec3 maxValues{(float)tfBuffer.maxValues[0], (float)tfBuffer.maxValues[1], (float)tfBuffer.maxValues[2]};
+                maxValues = vec3{tfNode->getGlobalTsmMat() * vec4(maxValues, 1)};
+
+                if (maxValues.x > tfMesh->maxPos.x) { tfMesh->maxPos.x = maxValues.x; }
+                if (maxValues.y > tfMesh->maxPos.y) { tfMesh->maxPos.y = maxValues.y; }
+                if (maxValues.z > tfMesh->maxPos.z) { tfMesh->maxPos.z = maxValues.z; }
+            }
+        }
+
+        tfMesh->centerPos = (tfMesh->minPos + tfMesh->maxPos) * 0.5f;
+        tfMesh->aabb[0] = tfMesh->minPos;
+        tfMesh->aabb[1] = vec3(tfMesh->minPos.x, tfMesh->minPos.y, tfMesh->maxPos.z);
+        tfMesh->aabb[2] = vec3(tfMesh->maxPos.x, tfMesh->minPos.y, tfMesh->maxPos.z);
+        tfMesh->aabb[3] = vec3(tfMesh->maxPos.x, tfMesh->minPos.y, tfMesh->minPos.z);
+
+        tfMesh->aabb[4] = tfMesh->aabb[0] + vec3(0, tfMesh->maxPos.y - tfMesh->minPos.y, 0);
+        tfMesh->aabb[5] = tfMesh->aabb[1] + vec3(0, tfMesh->maxPos.y - tfMesh->minPos.y, 0);
+        tfMesh->aabb[6] = tfMesh->aabb[2] + vec3(0, tfMesh->maxPos.y - tfMesh->minPos.y, 0);
+        tfMesh->aabb[7] = tfMesh->aabb[3] + vec3(0, tfMesh->maxPos.y - tfMesh->minPos.y, 0);
+    }
+
+    //---------------------
+    // compute model aabb
+    tfMinPos = vec3{std::numeric_limits<float>::max()};
+    tfMaxPos = vec3{std::numeric_limits<float>::min()};
+    for(auto& tfMesh : tfMeshes){
+        if (tfMesh->minPos.x < tfMinPos.x) { tfMinPos.x = tfMesh->minPos.x; }
+        if (tfMesh->minPos.y < tfMinPos.y) { tfMinPos.y = tfMesh->minPos.y; }
+        if (tfMesh->minPos.z < tfMinPos.z) { tfMinPos.z = tfMesh->minPos.z; }
+
+        if (tfMesh->maxPos.x > tfMaxPos.x) { tfMaxPos.x = tfMesh->maxPos.x; }
+        if (tfMesh->maxPos.y > tfMaxPos.y) { tfMaxPos.y = tfMesh->maxPos.y; }
+        if (tfMesh->maxPos.z > tfMaxPos.z) { tfMaxPos.z = tfMesh->maxPos.z; }
+    }
+    tfCenterPos = (tfMinPos + tfMaxPos) * 0.5f;
+    tfAABB.resize(8);
+
+    tfAABB[0] = tfMinPos;
+    tfAABB[1] = vec3(tfMinPos.x, tfMinPos.y, tfMaxPos.z);
+    tfAABB[2] = vec3(tfMaxPos.x, tfMinPos.y, tfMaxPos.z);
+    tfAABB[3] = vec3(tfMaxPos.x, tfMinPos.y, tfMinPos.z);
+
+    tfAABB[4] = tfAABB[0] + vec3(0, tfMaxPos.y - tfMinPos.y, 0);
+    tfAABB[5] = tfAABB[1] + vec3(0, tfMaxPos.y - tfMinPos.y, 0);
+    tfAABB[6] = tfAABB[2] + vec3(0, tfMaxPos.y - tfMinPos.y, 0);
+    tfAABB[7] = tfAABB[3] + vec3(0, tfMaxPos.y - tfMinPos.y, 0);
+}
+
+void GltfModel::update(float dt, CameraPtr camera, size_t aniIndex){
+    // update indexed animation
+    if (aniIndex < tfAnimations.size()){
+        if (aniIndex != lastAniIndex){
+            if (lastAniIndex != -1){
+                tfAnimations.at(lastAniIndex).reset();
+            }
+            lastAniIndex = aniIndex;
+        }
+        tfAnimations.at(aniIndex).update(dt);
+    }
+
+    // update node matrices
+    for(auto tfRootNode : tfRootNodes){
+        tfRootNode->visit(mat4(1));
+    }
+
+    // update joints buffer
+    for(const auto& tfSkin : tfSkins){
+        tfSkin->update();
+    }
+
+    // update morph targets
+    for(auto& tfMesh : tfMeshesContainMorphTarget){
+        for(auto& primitive : tfMesh->primitives){
+            primitive.update(tfMesh->getWeights());
+        }
+    }
+}
+---

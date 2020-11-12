@@ -1,0 +1,74 @@
+@comment_type // %s
+
+@s
+
+--- color_pass.h
+#ifndef COLOR_PASS_H
+#define COLOR_PASS_H
+
+#include "tow.h"
+
+class ColorPass;
+using ColorPassPtr = tow::ResourcePtr<ColorPass>;
+
+class ColorPass{
+private:
+    ColorPass(){}
+
+public:
+    static ColorPassPtr create(const std::vector<tow::Shader>& shaders);
+
+public:
+    void draw(tow::TextureGroupPtr texGroup, const std::string& name);
+    void draw();
+
+public:
+    const auto& getPipeline() const { return pipeline; }
+    const auto& getProgram() const { return pipeline->getProgram(); }
+
+private:
+    tow::GraphicPipelinePtr pipeline;
+};
+
+#endif
+---
+
+--- color_pass.cpp
+#include "color_pass.h"
+
+#include "glm.hpp"
+
+using namespace glm;
+
+ColorPassPtr ColorPass::create(const std::vector<tow::Shader>& shaders){
+    auto ptr = new ColorPass();
+
+    auto layout = tow::VertexLayout::create();
+    layout->add("a_position", {GL_FLOAT, 2, false});
+
+    vec2 vertices[] = {
+        {-1, -1}, {1, -1}, {1, 1}, {-1, 1}
+    };
+
+    GLubyte indices[] = {
+        0, 1, 2, 2, 3, 0
+    };
+
+    auto bufGroup = tow::BufferGroup::create();
+    bufGroup->createBuffer("b_vertex", vertices, {GL_ARRAY_BUFFER, sizeof(vec2), 4, GL_STATIC_DRAW});
+    bufGroup->createBuffer("b_index", indices, {GL_ELEMENT_ARRAY_BUFFER, sizeof(GLubyte), 6, GL_STATIC_DRAW});
+
+    ptr->pipeline = tow::GraphicPipeline::create({bufGroup, "b_vertex", "b_index"}, layout, shaders);
+
+    return ColorPassPtr(ptr);
+}
+
+void ColorPass::draw(tow::TextureGroupPtr texGroup, const std::string& name){
+    pipeline->getProgram()->setSampler(texGroup, name);
+    tow::drawElements(pipeline, GL_TRIANGLES);
+}
+
+void ColorPass::draw(){
+    tow::drawElements(pipeline, GL_TRIANGLES);
+}
+---

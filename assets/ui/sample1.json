@@ -1,0 +1,1179 @@
+{
+    "root": {
+        "tag": "Block",
+        "size": [
+            910.2222290039063,
+            512.0
+        ]
+    },
+    "children": [
+        {
+            "name": "pure_color_bg",
+            "tag": "Color",
+            "size": [
+                842.0,
+                444.0
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                455.0,
+                256.0
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                234,
+                192,
+                63,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false
+        },
+        {
+            "name": "panel_bg_1",
+            "tag": "Scale9",
+            "size": [
+                217.2034912109375,
+                150.70465087890625
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                340.3793029785156,
+                302.3621520996094
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "assets/ui/uipack_space/",
+            "atlas": "uipackSpace_sheet.png",
+            "uv rectangle": [
+                100.0,
+                312.0,
+                100.0,
+                100.0
+            ],
+            "image size": [
+                512.0,
+                512.0
+            ],
+            "visible": true,
+            "lock": false,
+            "split lines": [
+                0.46000000834465027,
+                0.44999998807907104,
+                0.6100000143051147,
+                0.550000011920929
+            ]
+        },
+        {
+            "name": "panel_bg_2",
+            "tag": "Scale9",
+            "size": [
+                207.4286346435547,
+                105.99998474121094
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                574.5399169921875,
+                413.0
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "assets/ui/uipack_space/",
+            "atlas": "uipackSpace_sheet.png",
+            "uv rectangle": [
+                100.0,
+                13.0,
+                100.0,
+                100.0
+            ],
+            "image size": [
+                512.0,
+                512.0
+            ],
+            "visible": true,
+            "lock": false,
+            "split lines": [
+                0.44999998807907104,
+                0.44999998807907104,
+                0.550000011920929,
+                0.550000011920929
+            ]
+        },
+        {
+            "name": "panel_bg_3",
+            "tag": "Scale9",
+            "size": [
+                238.33349609375,
+                181.66661071777344
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                587.8638305664063,
+                222.69204711914063
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "assets/ui/uipack_space/",
+            "atlas": "uipackSpace_sheet.png",
+            "uv rectangle": [
+                200.0,
+                312.0,
+                100.0,
+                100.0
+            ],
+            "image size": [
+                512.0,
+                512.0
+            ],
+            "visible": true,
+            "lock": false,
+            "split lines": [
+                0.44999998807907104,
+                0.44999998807907104,
+                0.550000011920929,
+                0.550000011920929
+            ]
+        },
+        {
+            "name": "progress_bar_bg_1",
+            "tag": "Scale9",
+            "size": [
+                179.33335876464844,
+                27.12982177734375
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                587.7607421875,
+                232.29208374023438
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "assets/ui/uipack_space/",
+            "atlas": "uipackSpace_sheet.png",
+            "uv rectangle": [
+                385.79998779296875,
+                197.89999389648438,
+                20.200000762939453,
+                25.799999237060547
+            ],
+            "image size": [
+                512.0,
+                512.0
+            ],
+            "visible": true,
+            "lock": false,
+            "split lines": [
+                0.44999998807907104,
+                0.44999998807907104,
+                0.550000011920929,
+                0.550000011920929
+            ]
+        },
+        {
+            "name": "progress_bar_1",
+            "tag": "Scale9",
+            "size": [
+                117.90462493896484,
+                28.20120620727539
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                558.2117309570313,
+                233.79049682617188
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "assets/ui/uipack_space/",
+            "atlas": "uipackSpace_sheet.png",
+            "uv rectangle": [
+                384.29998779296875,
+                92.19999694824219,
+                19.0,
+                27.399999618530273
+            ],
+            "image size": [
+                512.0,
+                512.0
+            ],
+            "visible": true,
+            "lock": false,
+            "split lines": [
+                0.44999998807907104,
+                0.6899999976158142,
+                0.550000011920929,
+                0.5699999928474426
+            ]
+        },
+        {
+            "name": "progress_bar_bg_2",
+            "tag": "Scale9",
+            "size": [
+                179.33335876464844,
+                27.12982177734375
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                587.4031982421875,
+                171.57774353027344
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "assets/ui/uipack_space/",
+            "atlas": "uipackSpace_sheet.png",
+            "uv rectangle": [
+                385.79998779296875,
+                197.89999389648438,
+                20.200000762939453,
+                25.799999237060547
+            ],
+            "image size": [
+                512.0,
+                512.0
+            ],
+            "visible": true,
+            "lock": false,
+            "split lines": [
+                0.44999998807907104,
+                0.44999998807907104,
+                0.550000011920929,
+                0.550000011920929
+            ]
+        },
+        {
+            "name": "progress_bar_2",
+            "tag": "Scale9",
+            "size": [
+                93.26172637939453,
+                28.91549301147461
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                544.8192138671875,
+                171.6475830078125
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "assets/ui/uipack_space/",
+            "atlas": "uipackSpace_sheet.png",
+            "uv rectangle": [
+                380.6000061035156,
+                222.8000030517578,
+                18.0,
+                27.700000762939453
+            ],
+            "image size": [
+                512.0,
+                512.0
+            ],
+            "visible": true,
+            "lock": false,
+            "split lines": [
+                0.44999998807907104,
+                0.44999998807907104,
+                0.550000011920929,
+                0.550000011920929
+            ]
+        },
+        {
+            "name": "btn2",
+            "tag": "Button",
+            "size": [
+                62.19778823852539,
+                27.857147216796875
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                612.8666381835938,
+                386.0
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "state": [
+                {
+                    "name": "normal",
+                    "directory": "assets/ui/uipack_space/",
+                    "atlas": "uipackSpace_sheet.png",
+                    "uv rectangle": [
+                        384.0,
+                        36.0,
+                        21.0,
+                        27.0
+                    ],
+                    "image size": [
+                        512.0,
+                        512.0
+                    ],
+                    "split lines": [
+                        0.44999998807907104,
+                        0.44999998807907104,
+                        0.550000011920929,
+                        0.550000011920929
+                    ],
+                    "size": [
+                        61.428558349609375,
+                        27.857147216796875
+                    ]
+                },
+                {
+                    "name": "pressed",
+                    "directory": "assets/ui/uipack_space/",
+                    "atlas": "uipackSpace_sheet.png",
+                    "uv rectangle": [
+                        384.0,
+                        92.0,
+                        21.0,
+                        27.0
+                    ],
+                    "image size": [
+                        512.0,
+                        512.0
+                    ],
+                    "split lines": [
+                        0.44999998807907104,
+                        0.44999998807907104,
+                        0.550000011920929,
+                        0.550000011920929
+                    ],
+                    "size": [
+                        62.19778823852539,
+                        27.857147216796875
+                    ]
+                },
+                {
+                    "name": "disabled",
+                    "directory": "assets/ui/uipack_space/",
+                    "atlas": "uipackSpace_sheet.png",
+                    "uv rectangle": [
+                        384.0,
+                        10.0,
+                        21.0,
+                        27.0
+                    ],
+                    "image size": [
+                        512.0,
+                        512.0
+                    ],
+                    "split lines": [
+                        0.44999998807907104,
+                        0.44999998807907104,
+                        0.550000011920929,
+                        0.550000011920929
+                    ],
+                    "size": [
+                        100.0,
+                        100.0
+                    ]
+                }
+            ],
+            "state index": 1,
+            "label": {
+                "text": "maybe",
+                "fontname": "Roboto-Medium.ttf",
+                "font size": 15,
+                "alignment": 1,
+                "color": [
+                    255,
+                    254,
+                    254,
+                    255
+                ]
+            }
+        },
+        {
+            "name": "btn1",
+            "tag": "Button",
+            "size": [
+                61.428558349609375,
+                27.857147216796875
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                537.2566528320313,
+                385.67535400390625
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                255,
+                255,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "state": [
+                {
+                    "name": "normal",
+                    "directory": "assets/ui/uipack_space/",
+                    "atlas": "uipackSpace_sheet.png",
+                    "uv rectangle": [
+                        384.0,
+                        36.0,
+                        21.0,
+                        27.0
+                    ],
+                    "image size": [
+                        512.0,
+                        512.0
+                    ],
+                    "split lines": [
+                        0.44999998807907104,
+                        0.44999998807907104,
+                        0.550000011920929,
+                        0.550000011920929
+                    ],
+                    "size": [
+                        61.428558349609375,
+                        27.857147216796875
+                    ]
+                },
+                {
+                    "name": "pressed",
+                    "directory": "assets/ui/uipack_space/",
+                    "atlas": "uipackSpace_sheet.png",
+                    "uv rectangle": [
+                        384.0,
+                        92.0,
+                        21.0,
+                        27.0
+                    ],
+                    "image size": [
+                        512.0,
+                        512.0
+                    ],
+                    "split lines": [
+                        0.44999998807907104,
+                        0.44999998807907104,
+                        0.550000011920929,
+                        0.550000011920929
+                    ],
+                    "size": [
+                        61.428558349609375,
+                        27.857147216796875
+                    ]
+                },
+                {
+                    "name": "disabled",
+                    "directory": "assets/ui/uipack_space/",
+                    "atlas": "uipackSpace_sheet.png",
+                    "uv rectangle": [
+                        384.0,
+                        10.0,
+                        21.0,
+                        27.0
+                    ],
+                    "image size": [
+                        512.0,
+                        512.0
+                    ],
+                    "split lines": [
+                        0.44999998807907104,
+                        0.44999998807907104,
+                        0.550000011920929,
+                        0.550000011920929
+                    ],
+                    "size": [
+                        61.428558349609375,
+                        27.857147216796875
+                    ]
+                }
+            ],
+            "state index": 0,
+            "label": {
+                "text": "yes",
+                "fontname": "Roboto-Medium.ttf",
+                "font size": 15,
+                "alignment": 1,
+                "color": [
+                    255,
+                    254,
+                    254,
+                    255
+                ]
+            }
+        },
+        {
+            "name": "bar",
+            "tag": "Text",
+            "size": [
+                58.88727569580078,
+                21.8470401763916
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                500.0,
+                184.67950439453125
+            ],
+            "pivot": [
+                0.0,
+                0.0
+            ],
+            "color": [
+                83,
+                83,
+                83,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "bar",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 16,
+            "alignment": 0
+        },
+        {
+            "name": "foo",
+            "tag": "Text",
+            "size": [
+                40.288116455078125,
+                17.450889587402344
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                500.0,
+                248.15306091308594
+            ],
+            "pivot": [
+                0.0,
+                0.0
+            ],
+            "color": [
+                83,
+                83,
+                83,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "foo",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 16,
+            "alignment": 0
+        },
+        {
+            "name": "Do you want to quit?",
+            "tag": "Text",
+            "size": [
+                165.0,
+                25.0
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                592.12109375,
+                417.0705261230469
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                83,
+                83,
+                83,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "Do you want to quit?",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 17,
+            "alignment": 0
+        },
+        {
+            "name": "Title A",
+            "tag": "Text",
+            "size": [
+                84.0,
+                36.0
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                238.9952850341797,
+                333.8013610839844
+            ],
+            "pivot": [
+                0.0,
+                0.0
+            ],
+            "color": [
+                255,
+                254,
+                254,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "Title A",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 18,
+            "alignment": 0
+        },
+        {
+            "name": "Title B",
+            "tag": "Text",
+            "size": [
+                77.0,
+                33.0
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                517.611083984375,
+                444.5
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                254,
+                254,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "Title B",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 18,
+            "alignment": 0
+        },
+        {
+            "name": "Title C",
+            "tag": "Text",
+            "size": [
+                84.0,
+                36.0
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                477.9705505371094,
+                272.0186462402344
+            ],
+            "pivot": [
+                0.0,
+                0.0
+            ],
+            "color": [
+                255,
+                254,
+                254,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "Title C",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 18,
+            "alignment": 0
+        },
+        {
+            "name": "simple block",
+            "tag": "Block",
+            "size": [
+                119.76921081542969,
+                41.9231071472168
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                103.8526611328125,
+                382.391845703125
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                255,
+                128,
+                128,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false
+        },
+        {
+            "name": "A long to-do list",
+            "tag": "Text",
+            "size": [
+                174.93106079101563,
+                21.586204528808594
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                244.0,
+                314.7666320800781
+            ],
+            "pivot": [
+                0.0,
+                0.0
+            ],
+            "color": [
+                83,
+                83,
+                83,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "A long to-do list",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 16,
+            "alignment": 0
+        },
+        {
+            "name": "1. implement undo/redo",
+            "tag": "Text",
+            "size": [
+                174.93106079101563,
+                21.586204528808594
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                246.0,
+                286.7666320800781
+            ],
+            "pivot": [
+                0.0,
+                0.0
+            ],
+            "color": [
+                83,
+                83,
+                83,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "1. implement undo/redo",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 16,
+            "alignment": 0
+        },
+        {
+            "name": "2. need a tool like texture packer",
+            "tag": "Text",
+            "size": [
+                196.93106079101563,
+                22.586204528808594
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                246.0,
+                258.7666320800781
+            ],
+            "pivot": [
+                0.0,
+                0.0
+            ],
+            "color": [
+                83,
+                83,
+                83,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "2. need a tool like texture packer",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 16,
+            "alignment": 0
+        },
+        {
+            "name": "3. ...",
+            "tag": "Text",
+            "size": [
+                196.93106079101563,
+                22.586204528808594
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                246.0,
+                233.76663208007813
+            ],
+            "pivot": [
+                0.0,
+                0.0
+            ],
+            "color": [
+                83,
+                83,
+                83,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "3. ...",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 16,
+            "alignment": 0
+        },
+        {
+            "name": "This is a simple block, you can change its tag to export a new widget for your editor",
+            "tag": "Text",
+            "size": [
+                188.2184600830078,
+                50.0
+            ],
+            "scale": [
+                1.0,
+                1.0
+            ],
+            "rotation": 0.0,
+            "translation": [
+                140.24325561523438,
+                433.14984130859375
+            ],
+            "pivot": [
+                0.5,
+                0.5
+            ],
+            "color": [
+                50,
+                50,
+                50,
+                255
+            ],
+            "directory": "",
+            "atlas": "",
+            "uv rectangle": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+            ],
+            "image size": [
+                1.0,
+                1.0
+            ],
+            "visible": true,
+            "lock": false,
+            "text": "This is a simple block, you can change its tag to export a new widget for your editor",
+            "fontname": "Roboto-Medium.ttf",
+            "font size": 16,
+            "alignment": 0
+        }
+    ]
+}

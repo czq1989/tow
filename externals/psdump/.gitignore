@@ -1,0 +1,11 @@
+.DS_Store
+temp
+*~
+*.a
+*.o
+*.user
+*.ncb
+*.suo
+build
+Debug
+Release

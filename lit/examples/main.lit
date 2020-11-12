@@ -1,0 +1,96 @@
+
+
+@s
+
+// implemention
+--- main.cpp
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+#include "tow.h"
+#include "glfw3.h"
+#include "gltf_model_viewer.h"
+#include "shader_toy.h"
+#include "ui_editor.h"
+#include "solution.h"
+
+int main(){
+    //---------------------
+    // setup glfw
+    glfwSetErrorCallback([](int err, const char* desc){
+        fprintf(stderr,"glfw error %d: %s\n", err, desc);
+    });
+
+    if (glfwInit() == 0){
+        return 1;
+    }
+
+    auto window = glfwCreateWindow(1280, 720, "tow", nullptr, nullptr);
+    if (window == nullptr){
+        return 1;
+    }
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1); // enable vsync
+
+    //------------------------------
+    // initialize opengl loader
+    if (gladLoadGL() == 0){
+       fprintf(stderr,"failed to initialize opengl loader!\n");
+        return 1;
+    }
+
+    //-----------------------
+    // setup imgui
+    assert(IMGUI_CHECKVERSION());
+    ImGui::CreateContext();
+
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 430");
+
+    //-------------------
+    // create examples
+    auto sln = Solution::create(window, {1280.0f, 720.0f});
+    sln->add<GltfModelViewer>("GLTF Model Viewer");
+    sln->add<ShaderToy>("Shader Toy");
+    sln->add<UiEditor>("UI Editor");
+    sln->start(0);
+
+    // enable gl debug
+    tow::enableDebugMessageOutput();
+
+    //-----------------------
+    // glfw loop
+    while(!glfwWindowShouldClose(window)){
+        glfwPollEvents();
+
+        int width, height;
+        glfwGetFramebufferSize(window, &width, &height);
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        sln->show(width, height);
+
+        glViewport(0, 0, width, height);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        ImGui::Render();
+
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+    }
+
+    //-----------------
+    // clean up
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    sln->destroy();
+    AssetManager::get()->destroy();
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
+}
+---

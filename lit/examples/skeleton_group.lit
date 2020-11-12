@@ -1,0 +1,142 @@
+@comment_type // %s
+
+@s
+
+--- skeleton_group.h
+#ifndef SKELETON_GROUP_H
+#define SKELETON_GROUP_H
+
+#include "tow.h"
+#include "asset_manager.h"
+#include "auxiliary.h"
+
+@{skeleton}
+@{skeleton group}
+
+#endif
+---
+
+--- skeleton_group.cpp
+#include "skeleton_group.h"
+#include "glm.hpp"
+
+@{skeleton implemention}
+@{skeleton group implemention}
+---
+
+--- skeleton
+//-------------
+// skeleton
+class Skeleton{
+private:
+    Skeleton(GltfModelPtr model, GltfSkinPtr skin);
+
+public:
+    static tow::ResourcePtr<Skeleton> create(GltfModelPtr model, GltfSkinPtr skin);
+
+public:
+    void draw(const glm::mat4& pvMat);
+    void setColor(const glm::u8vec3& color) { if (auxLines) auxLines->fillColors(color); }
+
+private:
+    GltfSkinPtr tfSkin;
+    GltfModelPtr tfModel;
+    AuxiliaryPtr auxLines;
+    std::vector<tow::BufferGroup::Block> auxBlocks;
+};
+using SkeletonPtr = tow::ResourcePtr<Skeleton>;
+---
+
+--- skeleton implemention
+using namespace tow;
+using namespace glm;
+
+static void visitJoint(GltfNodePtr parent, GltfNodePtr node, std::vector<GLushort>& indices){
+    if (parent){
+        const auto& parentJoint = parent->getJoint();
+        const auto& joint = node->getJoint();
+        if (parentJoint && joint){
+            indices.push_back((GLushort)parentJoint->getIndex());
+            indices.push_back((GLushort)joint->getIndex());
+        }
+    }
+
+    for(auto child : node->getChildren()){
+        visitJoint(node, child, indices);
+    }
+}
+
+Skeleton::Skeleton(GltfModelPtr model, GltfSkinPtr skin) : tfModel(model), tfSkin(skin) {
+    std::vector<GLushort> indices;
+    visitJoint(nullptr, tfModel->getNode(tfSkin->getRootNodeIndex()), indices);
+
+    if (indices.empty()){
+        for(size_t i = 1; i < skin->getNumJoints(); ++i){
+            indices.push_back((GLushort)(i - 1));
+            indices.push_back((GLushort)(i));
+        }
+    }
+    if (indices.size()){
+        auxLines = Auxiliary::create(tfSkin->getNumJoints(), indices.size());
+        auxLines->fillIndices(indices);
+
+        size_t offset{0};
+        for(const auto& tfJoint : tfSkin->getJoints()){
+            const auto& mat = tfModel->getNodes().at(tfJoint->getNodeIndex())->getGlobalTsmMat();
+            auxBlocks.push_back({&mat[3], offset, sizeof(vec3)});
+            offset += sizeof(vec3);
+        }
+    }
+}
+
+tow::ResourcePtr<Skeleton> Skeleton::create(GltfModelPtr model, GltfSkinPtr skin){
+    return tow::ResourcePtr<Skeleton>(new Skeleton(model, skin));
+}
+
+void Skeleton::draw(const glm::mat4& pvMat){
+    if (auxLines){
+        auxLines->getPipeline()->getBufferGroup()->write("b_vertex", auxBlocks);
+        auxLines->draw(GL_LINES, pvMat);
+    }
+}
+---
+
+--- skeleton group
+//---------------------
+// skeleton group
+class SkeletonGroup{
+private:
+    SkeletonGroup(GltfModelPtr model);
+
+public:
+    static tow::ResourcePtr<SkeletonGroup> create(GltfModelPtr model);
+
+public:
+    void draw(const glm::mat4& pvMat);
+
+    void setColor(const glm::u8vec3& color) { for(const auto& sk : skeletons){ sk->setColor(color); } }
+    const auto& getSkeleton(size_t index) { return skeletons.at(index); }
+
+private:
+    std::vector<SkeletonPtr> skeletons;
+};
+using SkeletonGroupPtr = tow::ResourcePtr<SkeletonGroup>;
+---
+
+--- skeleton group implemention
+SkeletonGroup::SkeletonGroup(GltfModelPtr model){
+    for(const auto& skin : model->getSkins()){
+        skeletons.push_back(Skeleton::create(model, skin));
+    }
+}
+
+tow::ResourcePtr<SkeletonGroup> SkeletonGroup::create(GltfModelPtr model){
+    return tow::ResourcePtr<SkeletonGroup>(new SkeletonGroup(model));
+}
+
+void SkeletonGroup::draw(const glm::mat4& pvMat){
+    for(auto& sk : skeletons){
+        sk->draw(pvMat);
+    }
+}
+---

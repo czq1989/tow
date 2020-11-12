@@ -1,0 +1,64 @@
+
+--- schlick brdf
+const vec3 dielectricSpecular = vec3(0.04);
+const vec3 black = vec3(0);
+const float kMinNom = 0.00001;
+
+vec3 FresnelSchlick(in vec3 F0, in vec3 V, in vec3 H){
+    float VdotH = 1 - max(0, dot(V, H));
+    float VdotH2 = VdotH * VdotH;
+    return F0 + (1 - F0) * VdotH2 * VdotH2 * VdotH;
+}
+
+vec3 FresnelSchlickRoughness(in vec3 F0, in vec3 V, in vec3 H, in float roughness){
+    float VdotH = 1 - max(0, dot(V, H));
+    float VdotH2 = VdotH * VdotH;
+    return F0 + (max(vec3(1 - roughness), F0) - F0) * VdotH2 * VdotH2 * VdotH;
+}
+
+float SmithJointGGX(in vec3 N, in vec3 L, in vec3 V, in float A){
+    float NdotL = max(0, dot(N, L));
+    float NdotV = max(0, dot(N, V));
+    float A2 = A * A;
+    float nom1 = NdotL * sqrt(NdotV * NdotV * (1 - A2) + A2);
+    float nom2 = NdotV * sqrt(NdotL * NdotL * (1 - A2) + A2);
+    return 0.5 / max(nom1 + nom2, kMinNom);
+}
+
+const float PI = 3.14159;
+
+float TrowbridgeReitz(in float A, in vec3 N, in vec3 H){
+    float A2 = A * A;
+    float NdotH = max(0, dot(N, H));
+    float nom = NdotH * NdotH * (A2 - 1) + 1;
+    return A2 / max(PI * nom * nom, kMinNom);
+}
+
+vec3 LambertDiffuse(in vec3 Cdiff){
+    return Cdiff / PI;
+}
+
+void SchlickBRDF(in vec3 baseColor,
+                 in float metallic,
+                 in float roughness,
+                 in vec3 V,
+                 in vec3 L,
+                 in vec3 N,
+                 out vec3 Fdiff,
+                 out vec3 Fspec){
+
+    vec3 Cdiff = mix(baseColor * (1 - dielectricSpecular.r), black, metallic);
+    vec3 F0 = mix(dielectricSpecular, baseColor, metallic);
+    float A = roughness * roughness;
+
+    vec3 H = normalize(L + V);
+
+    vec3 F = FresnelSchlick(F0, V, H);
+    float Vis = SmithJointGGX(N, L, V, A);
+    float D = TrowbridgeReitz(A, N, H);
+    vec3 diffuse = LambertDiffuse(Cdiff);
+
+    Fdiff = (1 - F) * diffuse;
+    Fspec = F * Vis * D;
+}
+---

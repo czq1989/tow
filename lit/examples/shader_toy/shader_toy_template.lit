@@ -1,0 +1,33 @@
+@s
+
+--- shader toy template
+#version 430 core
+
+uniform vec3      iResolution;           // viewport resolution (in pixels)
+uniform float     iTime;                 // shader playback time (in seconds)
+uniform float     iTimeDelta;            // render time (in seconds)
+uniform int       iFrame;                // shader playback frame
+uniform float     iChannelTime[4];       // channel playback time (in seconds)
+uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)
+uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
+
+//uniform samplerXX iChannel0..3;          // input channel. XX = 2D/Cube
+uniform sampler2D iChannel0;
+uniform sampler2D iChannel1;
+uniform sampler2D iChannel2;
+uniform sampler2D iChannel3;
+
+uniform vec4      iDate;                 // (year, month, day, time in seconds)
+uniform float     iSampleRate;           // sound sample rate (i.e., 44100)
+
+uniform vec2 u_origin; // the real origin of screen space
+
+out vec4 f_color;
+
+@{main code}
+
+void main(){
+    mainImage(f_color, gl_FragCoord.xy - u_origin);
+}
+---
+

@@ -1,0 +1,118 @@
+@comment_type // %s
+
+@s
+
+--- example_util.h
+#ifndef EXAMPLE_UTIL_H
+#define EXAMPLE_UTIL_H
+
+#include <string>
+#include <vector>
+
+void strFormat(std::string& buf, const char* format, ...);
+
+std::string getSuffix(const std::string& str);
+
+std::string getSubstr(const std::string& str, const std::vector<std::string>& starts);
+
+//------------------------------
+// texture format function
+struct TexFormatKey{
+    int componentCount{0}; // 1-4
+    int bits{0}; // 8-32
+    int type{0};
+
+    bool operator == (const TexFormatKey& rhs) const {
+        return componentCount == rhs.componentCount &&
+            bits == rhs.bits && type == rhs.type;
+    }
+};
+namespace std {
+    template <>
+    struct hash<TexFormatKey> {
+        size_t operator()(const TexFormatKey & key) const{
+            // z* maxY * maxX + y * maxX + x
+            return key.type * 32 * 4 + key.bits * 4 + key.componentCount;
+        }
+    };
+}
+std::pair<int, int> getTexFormat(const TexFormatKey& key);
+
+#endif
+---
+
+--- example_util.cpp
+#include "example_util.h"
+
+#include "tow.h"
+
+#include <cstdarg>
+#include <cassert>
+#include <unordered_map>
+
+
+void strFormat(std::string& buf, const char* format, ...){
+    va_list argList;
+    va_start(argList, format);
+
+    va_list argListCopy;
+    va_copy(argListCopy, argList);
+
+    auto len = std::vsnprintf(nullptr, 0, format, argList);
+    assert(len > 0);
+    va_end(argList);
+
+    buf.resize(len, 0);
+
+    std::vsnprintf(&buf[0], buf.size() + 1, format, argListCopy);
+    va_end(argListCopy);
+}
+
+std::string getSuffix(const std::string& str){
+    auto pos = str.rfind('.');
+    assert(pos != std::string::npos);
+    assert(pos + 1 < str.size());
+    return str.substr(pos + 1);
+}
+
+std::string getSubstr(const std::string& str, const std::vector<std::string>& starts){
+    size_t pos{std::string::npos};
+
+    for(const auto& start : starts){
+        assert(start.size() >= 2);
+        auto dir = start.at(0);
+        auto target = start.substr(1);
+        if (dir == '+'){
+            pos = str.find_first_of(target);
+        }else if (dir == '-'){
+            pos = str.find_last_of(target);
+        }else{
+            break;
+        }
+        if (pos != std::string::npos){
+            if (pos + target.size() < str.size()){
+                return str.substr(pos + target.size());
+            }
+        }
+    }
+    return str;
+}
+
+static const std::unordered_map<TexFormatKey, std::pair<int, int>> s_texFormatMap = {
+    {{1, 8, GL_UNSIGNED_BYTE},      {GL_RED, GL_R8}},
+    {{1, 16, GL_UNSIGNED_SHORT},    {GL_RED, GL_R16}},
+    {{2, 8, GL_UNSIGNED_BYTE},      {GL_RG, GL_RG8}},
+    {{2, 16, GL_UNSIGNED_SHORT},    {GL_RG, GL_RG16}},
+    {{3, 8, GL_UNSIGNED_BYTE},      {GL_RGB, GL_RGB8}},
+    {{3, 16, GL_UNSIGNED_SHORT},    {GL_RGB, GL_RGB16}},
+    {{4, 8, GL_UNSIGNED_BYTE},      {GL_RGBA, GL_RGBA8}},
+    {{4, 16, GL_UNSIGNED_SHORT},    {GL_RGBA, GL_RGBA16}},
+    {{3, 32, GL_FLOAT},             {GL_RGB, GL_RGB32F}},
+    {{4, 32, GL_FLOAT},             {GL_RGBA, GL_RGBA32F}}
+};
+
+std::pair<int, int> getTexFormat(const TexFormatKey& key){
+    return s_texFormatMap.at(key);
+}
+
+---

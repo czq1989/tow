@@ -1,0 +1,96 @@
+@s
+
+--- pbr uniforms
+#define ALPHA_OPAQUE 0
+#define ALPHA_MASK 1
+#define ALPHA_BLEND 2
+
+struct GltfPbrMaterial {
+    vec4 baseColorFactor;
+    int baseColorTexCoordIndex;
+
+    float metallicFactor;
+    float roughnessFactor;
+    int metallicRoughnessTexCoordIndex;
+
+    int alphaMode;
+    float alphaCutoff;
+
+    int normalTexCoordIndex;
+    float normalScale;
+
+    int occlusionTexCoordIndex;
+    float occlusionStrength;
+
+    int emissiveTexCoordIndex;
+    vec3 emissiveFactor;
+};
+
+uniform GltfPbrMaterial u_pbrMt;
+
+uniform sampler2D s_baseColor;
+uniform sampler2D s_metallicRoughness;
+uniform sampler2D s_normal;
+uniform sampler2D s_emissive;
+---
+
+--- base color
+vec4 baseColor = u_pbrMt.baseColorFactor * g_color;
+if (u_pbrMt.baseColorTexCoordIndex >= 0){
+    vec2 texCoord = g_texCoord[u_pbrMt.baseColorTexCoordIndex];
+    baseColor *= texture(s_baseColor, texCoord);
+}
+baseColor.rgb = pow(baseColor.rgb, vec3(u_gamma));
+
+if (u_pbrMt.alphaMode == ALPHA_MASK && baseColor.a < u_pbrMt.alphaCutoff){
+    discard;
+}
+
+---
+
+--- metallic and roughness
+float metallic = u_pbrMt.metallicFactor;
+float roughness = u_pbrMt.roughnessFactor;
+if (u_pbrMt.metallicRoughnessTexCoordIndex >= 0){
+    vec2 texCoord = g_texCoord[u_pbrMt.metallicRoughnessTexCoordIndex];
+    vec2 ret = texture(s_metallicRoughness, texCoord).gb;
+    metallic *= ret.y;
+    roughness *= ret.x;
+}
+---
+
+--- normal
+vec3 normal = gl_FrontFacing ? g_normal : -g_normal;
+if (u_pbrMt.normalTexCoordIndex >= 0){
+    vec2 texCoord = g_texCoord[u_pbrMt.normalTexCoordIndex];
+    vec3 localN = texture(s_normal, texCoord).xyz;
+    localN = localN * 2.0 - 1.0;
+    normal = g_tbn * localN * vec3(u_pbrMt.normalScale, u_pbrMt.normalScale, 1.0);
+    normal = normalize(normal);
+}
+---
+
+--- occlusion
+float occlusion = u_pbrMt.occlusionStrength;
+if (u_pbrMt.occlusionTexCoordIndex >= 0){
+    vec2 texCoord = g_texCoord[u_pbrMt.occlusionTexCoordIndex];
+    occlusion *= texture(s_metallicRoughness, texCoord).r;
+}
+---
+
+--- emissive
+vec3 emissive = u_pbrMt.emissiveFactor;
+if (u_pbrMt.emissiveTexCoordIndex >= 0){
+    vec2 texCoord = g_texCoord[u_pbrMt.emissiveTexCoordIndex];
+    emissive *= texture(s_emissive, texCoord).rgb;
+}
+emissive = pow(emissive, vec3(u_gamma));
+---
+
+--- material parameters
+@{base color}
+@{metallic and roughness}
+@{normal}
+@{occlusion}
+@{emissive}
+---

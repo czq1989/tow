@@ -1,0 +1,357 @@
+
+--- imgui splitter
+//------------------
+// imgui splitter
+bool BeginSplitter(const std::string& name, const ImVec2& winPos, const ImVec2& winSize, size_t numColumns);
+void EndSplitter();
+
+bool BeginChildSplitter(const std::string& name, const ImVec2& winPos, const ImVec2& winSize);
+void EndChildSplitter();
+
+bool BeginColumnGroup(const std::string& groupName, float width, bool useDtWidth = true);
+void EndColumnGroup();
+
+bool BeginPane(const std::string& name, float height, int flags = 0, bool useDtHeight = true);
+void EndPane();
+
+bool BeginChildPane(const std::string& name, float height, int flags = 0, bool useDtHeight = true);
+void EndChildPane();
+---
+
+--- imgui splitter implemention
+//--------------------------------
+// imgui splitter implemention
+struct Pane{
+    float height{0};
+    bool useDtHeight{true};
+    std::string name;
+};
+
+struct ColumnPaneGroup{
+    float width{0};
+    bool useDtWidth{true};
+    std::vector<Pane> panes;
+    std::string name;
+};
+
+struct Splitter{
+    ImVec2 winPos;
+    ImVec2 winSize;
+    std::string name;
+    size_t numColumns{0};
+
+    std::vector<ColumnPaneGroup> paneGroups;
+
+    ImVec2 leftUpPadding{2.0f, 0.0f};
+    ImVec2 rightDownPadding{3.0f, 2.0f};
+
+    auto getContentPos() const {
+        return winPos + leftUpPadding;
+    }
+    auto getPaddingSize() const{
+        return leftUpPadding + rightDownPadding;
+    }
+};
+
+
+struct SplitterManager{
+    std::vector<std::string> curSplitterNameVec;
+
+    std::map<std::string, Splitter> splitterMap;
+
+    std::map<std::string, float> dtGroupWidthMap;
+    std::map<std::string, float> dtPaneHeightMap;
+
+    float paneSpacing{6.0f};
+    float minPaneExtent{55.0f};
+    ImVec4 bgColor{0.31f, 0.31f, 0.31f, 1.0f};
+
+
+    auto& getCurSplitter() {
+        assert(!curSplitterNameVec.empty());
+        return splitterMap.at(curSplitterNameVec.back());
+    }
+};
+
+static SplitterManager s_splitterMgr;
+
+static float GetGroupFinalWidth(const ColumnPaneGroup& group){
+    if (group.useDtWidth){
+        auto width = s_splitterMgr.dtGroupWidthMap[group.name] + group.width;
+        return std::max(s_splitterMgr.minPaneExtent, width);
+    }else{
+        return group.width;
+    }
+}
+
+static float GetPaneFinalHeight(const Pane& pane){
+    if (pane.useDtHeight){
+        auto height = s_splitterMgr.dtPaneHeightMap[pane.name] + pane.height;
+        return std::max(s_splitterMgr.minPaneExtent, height);
+    }else{
+        return pane.height;
+    }
+}
+
+static void AdjustBySpacing(size_t curGroupIndex, size_t numGroups, size_t curPaneIndex,
+    size_t numPanes, ImVec2& pos, ImVec2& size){
+
+    const float spacing = s_splitterMgr.paneSpacing;
+    const float halfSpacing = spacing * 0.5f;
+
+    if (curGroupIndex > 0){
+        pos.x += halfSpacing;
+    }
+    if (curPaneIndex > 0){
+        pos.y += halfSpacing;
+    }
+
+    if (curGroupIndex > 0 && curGroupIndex + 1 < numGroups){
+        size.x -= spacing;
+    }else if (numGroups > 1){
+        if (curGroupIndex == 0 || curGroupIndex + 1 == numGroups){
+            size.x -= halfSpacing;
+        }
+    }
+
+    if (curPaneIndex > 0 && curPaneIndex + 1 < numPanes){
+        size.y -= spacing;
+    }else if (numPanes > 1){
+        if (curPaneIndex == 0 || curPaneIndex + 1 == numPanes){
+            size.y -= halfSpacing + s_splitterMgr.getCurSplitter().rightDownPadding.y;
+        }
+    }
+}
+
+static void AdjustBySpacing(size_t curGroupIndex, size_t numGroups, size_t curPaneIndex,
+    size_t numPanes, ImVec2& pos){
+    ImVec2 size;
+    AdjustBySpacing(curGroupIndex, numGroups, curPaneIndex, numPanes, pos, size);
+}
+
+static bool BeginPaneImpl(const std::string& name, float height, bool isChildPane, int flags, bool useDtHeight){
+    auto& curSplitter = s_splitterMgr.getCurSplitter();
+
+    assert(!curSplitter.paneGroups.empty());
+    auto& curGroup = curSplitter.paneGroups.back();
+
+    curGroup.panes.push_back({height, useDtHeight});
+    auto& curPane = curGroup.panes.back();
+    curPane.name = curGroup.name + name;
+
+    ImVec2 pos = isChildPane ? curSplitter.winPos : curSplitter.getContentPos();
+    ImVec2 size;
+
+    size_t curGroupIndex = curSplitter.paneGroups.size() - 1;
+    size_t curPaneIndex = curGroup.panes.size() - 1;
+
+    for(size_t i = 0; i < curGroupIndex; ++i){
+        pos.x += GetGroupFinalWidth(curSplitter.paneGroups.at(i));
+    }
+
+    for(size_t i = 0; i < curPaneIndex; ++i){
+        pos.y += GetPaneFinalHeight(curGroup.panes.at(i));
+    }
+
+    auto paddingSize = curSplitter.getPaddingSize();
+    size.x = GetGroupFinalWidth(curGroup);
+    size.x -= curGroupIndex == curSplitter.numColumns - 1 ? paddingSize.x : 0;
+
+    size.y = GetPaneFinalHeight(curPane);
+
+    // consider pane spacing
+    AdjustBySpacing(curGroupIndex, curSplitter.paneGroups.size(),
+        curPaneIndex, curGroup.panes.size(), pos, size);
+
+    auto winName = name + "##" + curGroup.name;
+
+    if (isChildPane){
+        SetNextWindowPos(GetWindowPos() + pos);
+        return BeginChild(winName.c_str(), size, false,
+            ImGuiWindowFlags_NoResize
+            | ImGuiWindowFlags_NoFocusOnAppearing
+            | ImGuiWindowFlags_NoBringToFrontOnFocus
+            | flags);
+    }else{
+        SetNextWindowPos(pos);
+        SetNextWindowSize(size);
+        return Begin(winName.c_str(), nullptr,
+            ImGuiWindowFlags_NoResize
+            | ImGuiWindowFlags_NoFocusOnAppearing
+            | ImGuiWindowFlags_NoBringToFrontOnFocus
+            | flags);
+    }
+}
+
+static void EndSplitterImpl(bool isChildSplitter){
+    auto& curSplitter = s_splitterMgr.getCurSplitter();
+
+    if (!isChildSplitter){
+        SetNextWindowPos(curSplitter.winPos);
+        SetNextWindowSize(curSplitter.winSize);
+
+        PushStyleColor(ImGuiCol_WindowBg, s_splitterMgr.bgColor);
+        PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+
+        Begin(s_splitterMgr.curSplitterNameVec.back().c_str(), nullptr,
+            ImGuiWindowFlags_NoBringToFrontOnFocus
+            | ImGuiWindowFlags_NoFocusOnAppearing
+            | ImGuiWindowFlags_NoCollapse
+            | ImGuiWindowFlags_NoTitleBar
+            | ImGuiWindowFlags_NoScrollbar
+            | ImGuiWindowFlags_NoResize
+            );
+
+        PopStyleVar();
+        PopStyleColor();
+    }
+
+    // handle vertical invisible buttons
+    const float spacing = s_splitterMgr.paneSpacing;
+    const float halfSpacing = spacing * 0.5f;
+    const float minExtent = s_splitterMgr.minPaneExtent;
+
+    ImVec2 pos = isChildSplitter ? curSplitter.getContentPos() : curSplitter.leftUpPadding;
+    ImVec2 size = ImVec2(spacing, curSplitter.winSize.y);
+
+    size_t btnId = 0;
+    for(size_t i = 1; i < curSplitter.paneGroups.size(); ++i){
+        auto& group = curSplitter.paneGroups.at(i - 1);
+        pos.x += GetGroupFinalWidth(group);
+
+        ImVec2 btnPos = pos;
+        AdjustBySpacing(i, curSplitter.paneGroups.size(), 0, group.panes.size(), btnPos);
+
+        if (size.x > 0 && size.y > 0){
+            PushID(btnId);
+            SetCursorPos(ImVec2(btnPos.x - spacing, btnPos.y));
+            InvisibleButton("inv_btn", size);
+            PopID();
+        }
+
+        if (IsItemHovered()){
+            SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        }
+
+        if (IsItemActive()){
+            SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+
+            auto& rightGroup = curSplitter.paneGroups.at(i);
+
+            auto dx = GetIO().MouseDelta.x;
+            if (GetGroupFinalWidth(group) + dx > minExtent
+                    && GetGroupFinalWidth(rightGroup) - dx > minExtent){
+
+                s_splitterMgr.dtGroupWidthMap[group.name] += dx;
+                s_splitterMgr.dtGroupWidthMap[rightGroup.name] -= dx;
+            }
+        }
+
+        ++btnId;
+    }
+
+    // handle horizontal invisible buttons
+    pos = isChildSplitter ? curSplitter.getContentPos() : curSplitter.leftUpPadding;
+
+    for(size_t i = 0; i < curSplitter.paneGroups.size(); ++i){
+        auto& group = curSplitter.paneGroups.at(i);
+
+        pos.y = 0;
+        for(size_t j = 1; j < group.panes.size(); ++j){
+            auto& pane = group.panes.at(j - 1);
+
+            pos.y += GetPaneFinalHeight(pane);
+
+            ImVec2 btnPos = pos;
+            AdjustBySpacing(i, curSplitter.paneGroups.size(), j, group.panes.size(), btnPos);
+
+            if (GetGroupFinalWidth(group) - halfSpacing > 0 && spacing > 0){
+                PushID(btnId);
+                SetCursorPos(ImVec2(btnPos.x, btnPos.y - spacing));
+                InvisibleButton("inv_btn", ImVec2(GetGroupFinalWidth(group) - halfSpacing, spacing));
+                PopID();
+            }
+
+            if (IsItemHovered()){
+                SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+            }
+
+            if (IsItemActive()){
+                SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+
+                auto& downPane = group.panes.at(j);
+
+                auto dy = GetIO().MouseDelta.y;
+                if (GetPaneFinalHeight(pane) + dy > minExtent && GetPaneFinalHeight(downPane) - dy > minExtent){
+                    s_splitterMgr.dtPaneHeightMap[pane.name] += dy;
+                    s_splitterMgr.dtPaneHeightMap[downPane.name] -= dy;
+                }
+            }
+
+            ++btnId;
+        }
+
+        pos.x += GetGroupFinalWidth(group);
+    }
+
+    if (!isChildSplitter){
+        End();
+    }
+
+    s_splitterMgr.curSplitterNameVec.pop_back();
+}
+
+bool BeginSplitter(const std::string& name, const ImVec2& winPos, const ImVec2& winSize, size_t numColumns){
+    assert(winSize.x > 0);
+    assert(winSize.y > 0);
+
+    s_splitterMgr.splitterMap[name] = {winPos, winSize, name, numColumns};
+
+    s_splitterMgr.curSplitterNameVec.push_back(name);
+
+    return true;
+}
+
+void EndSplitter(){
+    EndSplitterImpl(false);
+}
+
+bool BeginChildSplitter(const std::string& name, const ImVec2& winPos, const ImVec2& winSize){
+    return BeginSplitter(name, winPos, winSize, 0);
+}
+
+void EndChildSplitter(){
+    EndSplitterImpl(true);
+}
+
+bool BeginColumnGroup(const std::string& name, float width, bool useDtWidth){
+    auto& curSplitter = s_splitterMgr.getCurSplitter();
+
+    curSplitter.paneGroups.push_back({width, useDtWidth});
+
+    auto& curGroup = curSplitter.paneGroups.back();
+    curGroup.name = curSplitter.name + name;
+
+    return true;
+}
+
+void EndColumnGroup(){
+}
+
+bool BeginPane(const std::string& name, float height, int flags, bool useDtHeight){
+    return BeginPaneImpl(name, height, false, flags, useDtHeight);
+}
+
+void EndPane(){
+    End();
+}
+
+bool BeginChildPane(const std::string& name, float height, int flags, bool useDtHeight){
+    return BeginPaneImpl(name, height, true, flags, useDtHeight);
+}
+
+void EndChildPane(){
+    EndChild();
+}
+---
+

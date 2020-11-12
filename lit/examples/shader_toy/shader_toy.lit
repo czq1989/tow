@@ -1,0 +1,363 @@
+@comment_type // %s
+
+@s
+
+--- shader_toy.h
+#ifndef SHADER_TOY_H
+#define SHADER_TOY_H
+
+#include "tow.h"
+#include "solution.h"
+#include "color_pass.h"
+
+//---------------
+// shader toy
+class ShaderToy : public Solution::Project{
+public:
+    ShaderToy(const std::string& name);
+
+public:
+    void setup() override;
+    void show(size_t cIndex, size_t pIndex) override;
+    void exit() override;
+
+private:
+    void render(const Solution::Pane& pane);
+
+    void showMainView(Solution::Pane& pane);
+    void showListView(Solution::Pane& pane);
+    void showChannelView(Solution::Pane& pane);
+
+private:
+    ColorPassPtr colorPass;
+    tow::FramebufferPtr defaultFb;
+    tow::TextureGroupPtr texGroup;
+
+    struct Channel{
+        std::string path;
+        int filter{GL_NEAREST};
+        int wrap{GL_REPEAT};
+        bool vFlip{false};
+    };
+    struct ShaderDesc{
+        std::string name;
+        std::vector<Channel> channels;
+    };
+
+    std::vector<std::pair<std::string, ShaderDesc>> shaderMap;
+
+    struct Parameter{
+        size_t shaderIndex{0};
+        bool paused{false};
+        float elapsedTime{0};
+        int frameCount{0};
+    };
+    Parameter param;
+};
+
+#endif
+---
+
+--- shader_toy.cpp
+#include "shader_toy.h"
+
+#include "asset_manager.h"
+#include "example_util.h"
+
+using namespace tow;
+using namespace ImGui;
+
+//---------------------------
+// shader toy implemention
+
+ShaderToy::ShaderToy(const std::string& name) : Project(name){
+    projLayout.setColumns({
+        {"Column1", 0.16f, {{"List View", 1.0f}}},
+        {"Column2", 0.84f, {{"Main View", 1.0f}}},
+    });
+
+    projLayout.setFunc([](Solution::Layout& layout, const ImVec2& initSize, const ImVec2& winSize){
+        layout.getColumn(0).width = initSize.x * layout.getColumn(0).ratio;
+        layout.getColumn(1).width = winSize.x - layout.getColumn(0).width;
+    });
+
+    shaderMap = {
+        // iq's work
+        { "Happy Jumping", { "iq_happy_jumping.frag", {} } },
+        { "Geodesic Tiling", { "iq_geodesic_tiling.frag", {} } },
+        { "Raymarching - Primitives", { "iq_raymarching_primitives.frag", {} } },
+        { "Heart - 2D", { "iq_heart_2d.frag", {} } },
+        // personal work
+        { "Debug", { "shader_toy_debug.frag", {} } },
+    };
+}
+
+void ShaderToy::exit(){
+    param = Parameter();
+    colorPass = nullptr;
+    defaultFb = nullptr;
+    texGroup = nullptr;
+}
+
+void ShaderToy::setup(){
+    const auto& desc = shaderMap.at(param.shaderIndex).second;
+    std::string dir = "assets/shaders/shader_toy/";
+    std::string fs = dir + desc.name;
+    std::string vs = dir + "shader_toy_debug.vert";
+    colorPass = ColorPass::create({vs.c_str(), fs.c_str()});
+
+    texGroup = TexGroup::create();
+
+    std::string channelName;
+    int i = 0;
+    for(const auto& channel : desc.channels){
+        strFormat(channelName, "iChannel%d", i++);
+        ImageAsset()->loadImage8(
+            "assets/images/" + channel.path, {texGroup, channelName}, channel.vFlip);
+    }
+
+    defaultFb = Framebuffer::create();
+}
+
+void ShaderToy::render(const Solution::Pane& pane){
+    ImVec3 res(pane.window.size.x, pane.window.size.y, 0);
+
+    const auto& win = pane.window;
+
+    defaultFb->bind(win.pos.x, win.pos.y, res.x, res.y);
+
+    float dt = 0;
+    if (!param.paused){
+        param.elapsedTime += pane.window.dt;
+        param.frameCount += 1;
+        dt = pane.window.dt;
+    }
+
+    const auto& prog = colorPass->getProgram();
+
+    for(const auto& pr : texGroup->getStorageMap()){
+        if (prog->hasSampler(pr.first.c_str())){
+            prog->setSampler(texGroup, pr.first);
+        }
+    }
+
+    if (prog->hasUniform("u_origin")){
+        prog->setUniformf("u_origin", {&pane.window.pos, 2});
+    }
+
+    if (prog->hasUniform("iResolution")){
+        prog->setUniformf("iResolution", {&res, 3});
+    }
+
+    if (prog->hasUniform("iTime")){
+        prog->setUniformf("iTime", param.elapsedTime);
+    }
+
+    if (prog->hasUniform("iTimeDelta")){
+        prog->setUniformf("iTimeDelta", dt);
+    }
+
+    if (prog->hasUniform("iFrame")){
+        prog->setUniformi("iFrame", param.frameCount);
+    }
+
+    // todo: set iChannelTime[4] and iChannelResolution[4]
+
+    if (prog->hasUniform("iMousePos")){
+        static ImVec4 mousePos;
+        if (IsMouseDown(ImGuiMouseButton_Left)){
+            mousePos.x = pane.input.x;
+            mousePos.y = pane.input.y;
+        }
+        if (IsMouseClicked(ImGuiMouseButton_Left)){
+            mousePos.z = pane.input.x;
+            mousePos.w = pane.input.y;
+        }
+        prog->setUniformf("iMousePos", {&mousePos, 4});
+    }
+
+    // todo: set iDate and iSampleRate
+
+    glDisable(GL_DEPTH_TEST);
+    glClear(GL_COLOR_BUFFER_BIT);
+    colorPass->draw();
+}
+
+void ShaderToy::showMainView(Solution::Pane& pane){
+    auto winFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoBackground;
+    constexpr auto kBarHeight = 30.0f;
+    const auto kDefaultPadding = GetStyle().WindowPadding;
+    constexpr auto kButtonSpacing = 30.0f;
+    const auto& kHoveredColor = GetStyle().Colors[ImGuiCol_ButtonHovered];
+
+    PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    if (BeginPane(pane.name.c_str(), pane.height, winFlags)){
+
+        if (BeginChild("main view")){
+            if (BeginChild("rendering view", ImVec2(0, GetWindowHeight() - kBarHeight))){
+                pane.update();
+                GetWindowDrawList()->AddCallback([](const ImDrawList* parent_list, const ImDrawCmd* cmd){
+                    (void)parent_list;
+                    auto st = (ShaderToy*)(cmd->UserCallbackData);
+                    st->render(st->projLayout.getPane(1, 0));
+                }, this);
+
+                GetWindowDrawList()->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+            }
+            EndChild();
+
+            PushStyleColor(ImGuiCol_ChildBg, ImVec4(1, 1, 1, 1));
+            PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+            PushStyleColor(ImGuiCol_ButtonActive, kHoveredColor);
+            if (BeginChild("control bar")){
+                PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 1));
+                if (ButtonWithPivot(param.paused ? ICON_FA_PLAY : ICON_FA_PAUSE,
+                    ImVec2(kDefaultPadding.x, GetWindowHeight() * 0.5f), ImVec2(0.0f, 0.5f))){
+                    param.paused = !param.paused;
+                }
+                PopStyleColor();
+
+                static float t1 = 0.0f;
+                if (IsItemHovered()){
+                    t1 += GetIO().DeltaTime;
+                }else{
+                    t1 = 0.0f;
+                }
+
+                if (t1 > 1.0f){
+                    BeginTooltip();
+                    PushTextWrapPos(GetFontSize() * 35.0f);
+                    TextUnformatted("play/pause (shortcut P)");
+                    PopTextWrapPos();
+                    EndTooltip();
+                }
+
+                if (IsKeyReleased(GLFW_KEY_P)){
+                    param.paused = !param.paused;
+                }
+
+                auto reloadFunc = [this]{
+                    auto lastIndex = param.shaderIndex;
+                    param = Parameter();
+                    param.shaderIndex = lastIndex;
+                    setup();
+                };
+
+                PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 1));
+                if (ButtonWithPivot(ICON_FA_REDO_ALT,
+                    ImVec2(kDefaultPadding.x + kButtonSpacing, GetWindowHeight() * 0.5f), ImVec2(0.0f, 0.5f))){
+                    reloadFunc();
+                }
+                PopStyleColor();
+
+                static float t2 = 0.0f;
+                if (IsItemHovered()){
+                    t2 += GetIO().DeltaTime;
+                }else{
+                    t2 = 0.0f;
+                }
+
+                if (t2 > 1.0f){
+                    BeginTooltip();
+                    PushTextWrapPos(GetFontSize() * 35.0f);
+                    TextUnformatted("reload (shortcut F5)");
+                    PopTextWrapPos();
+                    EndTooltip();
+                }
+                if (IsKeyReleased(GLFW_KEY_F5)){
+                    reloadFunc();
+                }
+
+                PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 1));
+                std::string str;
+                strFormat(str, "%.1f fps", GetIO().Framerate);
+                TextWithPivot(str.c_str(),
+                    ImVec2(kDefaultPadding.x + kButtonSpacing*2, GetWindowHeight() * 0.5f),
+                    ImVec2(0.0f, 0.5f));
+                PopStyleColor();
+            }
+            EndChild();
+            PopStyleColor(3);
+        }
+        EndChild();
+    }
+    EndPane();
+    PopStyleVar(2);
+}
+
+void ShaderToy::showListView(Solution::Pane& pane){
+    PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 10));
+    if (BeginPane(pane.name.c_str(), pane.height, ImGuiWindowFlags_NoTitleBar)){
+        if (CollapsingHeader("Awesome work of iq")){
+            for(size_t i = 0; i < 4; ++i){
+                const auto& name = shaderMap.at(i).first;
+                if (Selectable(name.c_str(), param.shaderIndex == i)){
+                    param.shaderIndex = i;
+                    setup();
+                }
+            }
+        }
+        if (CollapsingHeader("Personal")){
+            for(size_t i = 4; i < shaderMap.size(); ++i){
+                if (Selectable(shaderMap.at(i).first.c_str(), param.shaderIndex == i)){
+                    param.shaderIndex = i;
+                    setup();
+                }
+            }
+        }
+    }
+    EndPane();
+    PopStyleVar(2);
+}
+
+void ShaderToy::showChannelView(Solution::Pane& pane){
+    auto winFlags = ImGuiWindowFlags_NoTitleBar;
+
+    PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    BeginPane(pane.name.c_str(), pane.height, winFlags);
+        Text("Channels");
+        Separator();
+
+        constexpr int kImageHeight = 150;
+        const int kMaxNumChannels = 4;
+        const auto& desc = shaderMap.at(param.shaderIndex).second;
+        std::string name;
+
+        for(int i = 0; i < kMaxNumChannels; ++i){
+            GLuint handle = 0;
+            strFormat(name, "iChannel%d", i);
+            if (texGroup->has(name)) {
+                handle = texGroup->getHandle(name);
+                const auto& channel = desc.channels.at(i);
+
+                glBindTexture(GL_TEXTURE_2D, handle);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, channel.filter);
+                if (channel.filter == GL_NEAREST_MIPMAP_NEAREST){
+                    glGenerateMipmap(GL_TEXTURE_2D);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                }else{
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, channel.filter);
+                }
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, channel.wrap);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, channel.wrap);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            Image((ImTextureID)handle, ImVec2(GetWindowContentRegionWidth(), kImageHeight));
+        }
+    EndPane();
+    PopStyleVar();
+}
+
+void ShaderToy::show(size_t cIndex, size_t pIndex){
+    (void)(pIndex);
+
+    if (cIndex == 0){
+        showListView(projLayout.getPane(0, 0));
+    }else if (cIndex == 1){
+        showMainView(projLayout.getPane(1, 0));
+    }
+}
+
+---

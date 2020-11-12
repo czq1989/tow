@@ -1,0 +1,1073 @@
+
+
+--- shader variable
+@{shader variable table}
+@{uniform sender}
+@{subroutine sender}
+@{sampler sender}
+@{program input sender}
+@{program output sender}
+@{binding point manager}
+@{buffer binding}
+@{block sender}
+
+---
+
+--- shader variable implemention
+@{shader variable table implemention}
+@{uniform sender implemention}
+@{subroutine sender implemention}
+@{sampler sender implemention}
+@{program input sender implemention}
+@{program output sender implemention}
+@{binding point manager implemention}
+@{buffer binding implemention}
+@{block sender implemention}
+
+---
+
+--- shader variable table
+//-------------------------
+// shader variable table
+class Program;
+using ProgramPtr = ResourcePtr<Program>;
+
+class ShaderVarTable{
+public:
+    template<class T>
+    class VariableMap{
+    public:
+        auto has(const std::string& name) const { return varMap.find(name) != varMap.end(); }
+        const auto& get(const std::string& name) const { return varMap.at(name); }
+        const auto& getMap() const { return varMap; }
+        auto size() const { return varMap.size(); }
+        auto empty() const { return varMap.empty(); }
+
+    public:
+        void insert(const std::pair<std::string, const T&>& pr) { varMap.insert(pr); }
+
+    private:
+        std::map<std::string, T> varMap;
+    };
+
+public:
+    ShaderVarTable(){}
+    ShaderVarTable(GLuint handle) : progHandle(handle) {}
+    ShaderVarTable(const std::vector<Shader>& shaders);
+
+public:
+    struct Uniform{
+        int location{-1};
+        int type{0};
+        int arrayLen{0};
+    };
+    using Sampler = Uniform;
+
+    struct Block{
+        struct Attribute{
+           int type;
+           int arrayLen{0};
+           int offset{0};
+           int size{0};
+        };
+
+        int index{-1};
+        int size{0};
+        std::map<std::string, Attribute> attributeMap;
+
+        const auto& get(const std::string& name) const { return attributeMap.at(name); }
+    };
+
+    struct ProgramIO{
+        int location{-1};
+        int type{0};
+        int arrayLen{0};
+    };
+
+    struct Subroutine{
+        int index{-1};
+    };
+
+public:
+    void build();
+    void buildUniform();
+    void buildProgramIO();
+    void buildSubroutine();
+    void buildBlock();
+    void buildBlockIndex();
+
+    void setHandle(GLuint handle) { progHandle = handle; }
+
+public:
+    void dumpUniform() const;
+    void dumpSampler() const;
+    void dumpUniformBlock() const;
+    void dumpStorageBlock() const;
+    void dumpProgramInput() const;
+    void dumpProgramOutput() const;
+
+public:
+    const auto& getUniformMap() const { return uniformMap; }
+    const auto& getSamplerMap() const { return samplerMap; }
+
+    const auto& getUniformBlockMap() const { return uniformBlockMap; }
+    const auto& getStorageBlockMap() const { return storageBlockMap; }
+    const auto& getUniformBlockIndexMap() const { return uniformBlockIndexMap; }
+    const auto& getStorageBlockIndexMap() const { return storageBlockIndexMap; }
+
+    const auto& getProgramInputMap() const { return progInputMap; }
+    const auto& getProgramOutputMap() const { return progOutputMap; }
+
+    const auto& getSubroutineMap(int shaderType) const { return subroutineMap.at(shaderType); }
+    const auto& getSubroutineMap() const { return subroutineMap; }
+    const auto& getSubroutineUniformMap(int shaderType) const { return subroutineUniformMap.at(shaderType); }
+    const auto& getSubroutineUniformMap() const { return subroutineUniformMap; }
+
+private:
+    GLuint progHandle{0};
+    ProgramPtr prog;
+
+    VariableMap<Uniform> uniformMap;
+    VariableMap<Sampler> samplerMap;
+
+    VariableMap<Block> uniformBlockMap;
+    VariableMap<Block> storageBlockMap;
+
+    VariableMap<int> uniformBlockIndexMap;
+    VariableMap<int> storageBlockIndexMap;
+
+    VariableMap<ProgramIO> progInputMap;
+    VariableMap<ProgramIO> progOutputMap;
+
+    std::map<int, VariableMap<Subroutine>> subroutineMap;
+    std::map<int, VariableMap<Uniform>> subroutineUniformMap;
+
+    static std::unordered_set<GLint> s_samplerTypeSet;
+};
+---
+
+--- shader variable table implemention
+//===========================================
+// shader variable table implemention
+std::unordered_set<GLint> ShaderVarTable::s_samplerTypeSet = {
+    GL_SAMPLER_1D,
+    GL_SAMPLER_2D,
+    GL_SAMPLER_3D,
+    GL_SAMPLER_CUBE,
+    GL_SAMPLER_1D_SHADOW,
+    GL_SAMPLER_2D_SHADOW,
+    GL_SAMPLER_1D_ARRAY,
+    GL_SAMPLER_2D_ARRAY,
+    GL_SAMPLER_1D_ARRAY_SHADOW,
+    GL_SAMPLER_2D_ARRAY_SHADOW,
+    GL_SAMPLER_CUBE_SHADOW,
+    GL_INT_SAMPLER_1D,
+    GL_INT_SAMPLER_2D,
+    GL_INT_SAMPLER_3D,
+    GL_INT_SAMPLER_CUBE,
+    GL_INT_SAMPLER_1D_ARRAY,
+    GL_INT_SAMPLER_2D_ARRAY,
+    GL_UNSIGNED_INT_SAMPLER_1D,
+    GL_UNSIGNED_INT_SAMPLER_2D,
+    GL_UNSIGNED_INT_SAMPLER_3D,
+    GL_UNSIGNED_INT_SAMPLER_CUBE,
+    GL_UNSIGNED_INT_SAMPLER_1D_ARRAY,
+    GL_UNSIGNED_INT_SAMPLER_2D_ARRAY,
+    GL_SAMPLER_2D_RECT,
+    GL_SAMPLER_2D_RECT_SHADOW,
+    GL_SAMPLER_BUFFER,
+    GL_INT_SAMPLER_2D_RECT,
+    GL_INT_SAMPLER_BUFFER,
+    GL_UNSIGNED_INT_SAMPLER_2D_RECT,
+    GL_UNSIGNED_INT_SAMPLER_BUFFER,
+    GL_SAMPLER_2D_MULTISAMPLE,
+    GL_INT_SAMPLER_2D_MULTISAMPLE,
+    GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE,
+    GL_SAMPLER_2D_MULTISAMPLE_ARRAY,
+    GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY,
+    GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY,
+    GL_SAMPLER_BINDING,
+    GL_SAMPLER_CUBE_MAP_ARRAY,
+    GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW,
+    GL_INT_SAMPLER_CUBE_MAP_ARRAY,
+    GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY
+};
+
+static void getProgramResource(GLuint handle, int interface, std::vector<GLenum> props,
+    std::function<void(const std::string& name, const std::vector<GLint>& results)> func){
+
+    GLint status;
+    glGetProgramiv(handle, GL_LINK_STATUS, &status);
+    mAssert(status == GL_TRUE);
+
+    props.push_back(GL_NAME_LENGTH);
+
+    std::vector<GLint> results(props.size());
+
+    GLint num{0};
+    glGetProgramInterfaceiv(handle, interface, GL_ACTIVE_RESOURCES, &num);
+
+    for(GLint index = 0; index < num; ++index){
+        // get the specified properties
+        glGetProgramResourceiv(handle, interface, index, props.size(), props.data(),
+            results.size(), nullptr, results.data());
+
+        // get the uniform name
+        std::string nameBuf(results.back(), 0);
+        glGetProgramResourceName(handle, interface, index, nameBuf.size(), nullptr, &nameBuf[0]);
+        nameBuf.pop_back();
+
+        func(nameBuf, results);
+    }
+}
+
+static ShaderVarTable::Block getBlockResource(GLuint handle, const std::string& blockName,
+    int blockInterface, int varInterface){
+
+    ShaderVarTable::Block block;
+
+    block.index = glGetProgramResourceIndex(handle, blockInterface, blockName.c_str());
+
+    std::vector<GLenum> props;
+    std::vector<GLint> blockParams;
+
+    props = {GL_BUFFER_DATA_SIZE, GL_NUM_ACTIVE_VARIABLES};
+    blockParams.resize(props.size());
+    glGetProgramResourceiv(handle, blockInterface, block.index, props.size(), props.data(),
+        blockParams.size(), nullptr, blockParams.data());
+    block.size = blockParams[0];
+
+    props = {GL_ACTIVE_VARIABLES};
+    blockParams.resize(blockParams[1]);
+    glGetProgramResourceiv(handle, blockInterface, block.index, props.size(), props.data(),
+        blockParams.size(), nullptr, blockParams.data());
+
+    props = {GL_NAME_LENGTH, GL_TYPE, GL_ARRAY_SIZE, GL_OFFSET};
+    std::vector<GLint> varParams(props.size());
+    for(auto varIndex : blockParams){
+        glGetProgramResourceiv(handle, varInterface, varIndex, props.size(),
+            props.data(), varParams.size(), nullptr, varParams.data());
+
+        std::string varName(varParams[0], 0);
+        glGetProgramResourceName(handle, varInterface, varIndex, varName.size(),
+            nullptr, &varName[0]);
+        varName.pop_back();
+
+        block.attributeMap.insert({varName, {varParams[1], varParams[2], varParams[3]}});
+    }
+
+    using OffsetPair = std::pair<std::string, int>;
+    std::vector<OffsetPair> varOffsets;
+    for(const auto& pr : block.attributeMap){
+        varOffsets.push_back({pr.first, pr.second.offset});
+    }
+    std::sort(varOffsets.begin(), varOffsets.end(),
+        [](const OffsetPair& lhs, const OffsetPair& rhs)->auto{
+            return lhs.second < rhs.second;
+    });
+    if (varOffsets.size() > 1){
+        for(size_t i = 0; i < varOffsets.size() - 1; ++i){
+            block.attributeMap.at(varOffsets[i].first).size = varOffsets[i + 1].second - varOffsets[i].second;
+        }
+        block.attributeMap.at(varOffsets.back().first).size = block.size - varOffsets.back().second;
+    }else if (varOffsets.size() == 1){
+        block.attributeMap.at(varOffsets[0].first).size = block.size;
+    }
+
+
+    return block;
+}
+
+ShaderVarTable::ShaderVarTable(const std::vector<Shader>& shaders){
+    prog = Program::create(shaders);
+    prog->link();
+    progHandle = prog->getHandle();
+}
+
+void ShaderVarTable::buildUniform(){
+    std::vector<GLenum> uniformProps{GL_LOCATION, GL_TYPE, GL_ARRAY_SIZE};
+    getProgramResource(progHandle, GL_UNIFORM, uniformProps,
+        [=, this](const std::string& nameBuf, const std::vector<GLint>& results){
+            if (s_samplerTypeSet.find(results[1]) != s_samplerTypeSet.end()){
+                samplerMap.insert({nameBuf, {results[0], results[1], results[2]}});
+            }else{
+                uniformMap.insert({nameBuf, {results[0], results[1], results[2]}});
+            }
+    });
+
+    GLint maxTexUnits{0};
+    glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &maxTexUnits);
+    mAssert(samplerMap.size() <= (size_t)maxTexUnits);
+}
+
+void ShaderVarTable::buildBlock(){
+    // get all active storage blocks
+    getProgramResource(progHandle, GL_SHADER_STORAGE_BLOCK, {},
+        [=, this](const std::string& nameBuf, const std::vector<GLint>& results){
+            (void)(results);
+            storageBlockMap.insert({nameBuf, getBlockResource(progHandle, nameBuf, GL_SHADER_STORAGE_BLOCK, GL_BUFFER_VARIABLE)});
+    });
+
+    // get all active uniform blocks
+    getProgramResource(progHandle, GL_UNIFORM_BLOCK, {},
+        [=, this](const std::string& nameBuf, const std::vector<GLint>& results){
+            (void)(results);
+            uniformBlockMap.insert({nameBuf, getBlockResource(progHandle, nameBuf, GL_UNIFORM_BLOCK, GL_UNIFORM)});
+    });
+}
+
+void ShaderVarTable::buildBlockIndex(){
+    getProgramResource(progHandle, GL_SHADER_STORAGE_BLOCK, {},
+        [=, this](const std::string& nameBuf, const std::vector<GLint>& results){
+            (void)(results);
+            auto index = glGetProgramResourceIndex(progHandle, GL_SHADER_STORAGE_BLOCK, nameBuf.c_str());
+            storageBlockIndexMap.insert({nameBuf, (int)index});
+    });
+
+    getProgramResource(progHandle, GL_UNIFORM_BLOCK, {},
+        [=, this](const std::string& nameBuf, const std::vector<GLint>& results){
+            (void)(results);
+            auto index = glGetProgramResourceIndex(progHandle, GL_UNIFORM_BLOCK, nameBuf.c_str());
+            uniformBlockIndexMap.insert({nameBuf, (int)index});
+    });
+}
+
+void ShaderVarTable::buildSubroutine(){
+    //-----------------------------
+    // get all active subroutines
+    std::vector<GLenum> subroutineProps;
+    std::vector<std::pair<int, int>> subroutinePairs = {
+        {GL_VERTEX_SUBROUTINE, GL_VERTEX_SHADER},
+        {GL_TESS_CONTROL_SUBROUTINE, GL_TESS_CONTROL_SHADER},
+        {GL_TESS_EVALUATION_SUBROUTINE, GL_TESS_EVALUATION_SHADER},
+        {GL_GEOMETRY_SUBROUTINE, GL_GEOMETRY_SHADER},
+        {GL_FRAGMENT_SUBROUTINE, GL_FRAGMENT_SHADER},
+        {GL_COMPUTE_SUBROUTINE, GL_COMPUTE_SHADER}
+    };
+
+    for(const auto& pr : subroutinePairs){
+        getProgramResource(progHandle, pr.first, subroutineProps,
+            [=, this](const std::string& nameBuf, const std::vector<GLint>& results){
+                (void)(results);
+                auto index = glGetProgramResourceIndex(progHandle, pr.first, nameBuf.c_str());
+                subroutineMap[pr.second].insert({nameBuf, {(int)index}});
+        });
+    }
+
+    //-------------------------------------
+    // get all active subroutine uniforms
+    std::vector<GLenum> subroutineUniformProps = {GL_LOCATION};
+    std::vector<std::pair<int, int>> subroutineUniformPairs = {
+        {GL_VERTEX_SUBROUTINE_UNIFORM, GL_VERTEX_SHADER},
+        {GL_TESS_CONTROL_SUBROUTINE_UNIFORM, GL_TESS_CONTROL_SHADER},
+        {GL_TESS_EVALUATION_SUBROUTINE_UNIFORM, GL_TESS_EVALUATION_SHADER},
+        {GL_GEOMETRY_SUBROUTINE_UNIFORM, GL_GEOMETRY_SHADER},
+        {GL_FRAGMENT_SUBROUTINE_UNIFORM, GL_FRAGMENT_SHADER},
+        {GL_COMPUTE_SUBROUTINE_UNIFORM, GL_COMPUTE_SHADER}
+    };
+
+    for(const auto& pr : subroutineUniformPairs){
+        getProgramResource(progHandle, pr.first, subroutineUniformProps,
+            [=, this](const std::string& nameBuf, const std::vector<GLint>& results){
+                subroutineUniformMap[pr.second].insert({nameBuf, {results[0], 0, 1}});
+        });
+    }
+}
+
+void ShaderVarTable::buildProgramIO(){
+    std::vector<GLenum> ioProps{GL_LOCATION, GL_TYPE, GL_ARRAY_SIZE};
+    getProgramResource(progHandle, GL_PROGRAM_INPUT, ioProps,
+        [this](const std::string& nameBuf, const std::vector<GLint>& results){
+            progInputMap.insert({nameBuf, {results[0], results[1], results[2]}});
+    });
+    getProgramResource(progHandle, GL_PROGRAM_OUTPUT, ioProps,
+        [this](const std::string& nameBuf, const std::vector<GLint>& results){
+            progOutputMap.insert({nameBuf, {results[0], results[1], results[2]}});
+    });
+}
+
+void ShaderVarTable::build(){
+    buildUniform();
+    buildSubroutine();
+    buildBlockIndex();
+}
+
+void ShaderVarTable::dumpUniform() const{
+    printf("---- uniform ----\n");
+    for(const auto& pr : uniformMap.getMap()){
+        printf("%s: type=0x%x, arrayLen=%d, location=%d\n", pr.first.c_str(),
+            pr.second.type, pr.second.arrayLen, pr.second.location);
+    }
+}
+
+void ShaderVarTable::dumpSampler() const{
+    printf("---- sampler ----\n");
+    for(const auto& pr : samplerMap.getMap()){
+        printf("%s: type=0x%x, arrayLen=%d, location=%d\n", pr.first.c_str(),
+            pr.second.type, pr.second.arrayLen, pr.second.location);
+    }
+}
+
+void ShaderVarTable::dumpUniformBlock() const{
+    printf("---- uniform block ----\n");
+    for(const auto& pr : uniformBlockMap.getMap()){
+        printf("%s: size=%d, index=%d\n", pr.first.c_str(), pr.second.size,
+            pr.second.index);
+
+        for(const auto& attPr : pr.second.attributeMap){
+            printf("%s: type=0x%x, arrayLen=%d, offset=%d, size=%d\n", attPr.first.c_str(),
+                attPr.second.type, attPr.second.arrayLen, attPr.second.offset,
+                attPr.second.size);
+        }
+    }
+}
+
+void ShaderVarTable::dumpStorageBlock() const{
+    printf("---- uniform block ----\n");
+    for(const auto& pr : storageBlockMap.getMap()){
+        printf("%s: size=%d, index=%d\n", pr.first.c_str(), pr.second.size,
+            pr.second.index);
+
+        for(const auto& attPr : pr.second.attributeMap){
+            printf("%s: type=0x%x, arrayLen=%d, offset=%d, size=%d\n", attPr.first.c_str(),
+                attPr.second.type, attPr.second.arrayLen, attPr.second.offset,
+                attPr.second.size);
+        }
+    }
+}
+
+void ShaderVarTable::dumpProgramInput() const {
+    printf("---- program input ----\n");
+    for(const auto& pr : progInputMap.getMap()){
+        printf("%s: len=%d, type=0x%x, location=%d\n", pr.first.c_str(),
+            pr.second.arrayLen, pr.second.type, pr.second.location);
+    }
+}
+
+void ShaderVarTable::dumpProgramOutput() const {
+    printf("---- program output ----\n");
+    for(const auto& pr : progInputMap.getMap()){
+        printf("%s: len=%d, type=0x%x, location=%d\n", pr.first.c_str(),
+            pr.second.arrayLen, pr.second.type, pr.second.location);
+    }
+}
+---
+
+--- uniform sender
+//------------------
+// uniform sender
+class UniformSender{
+public:
+    struct Value{
+        int dataType;
+        size_t componentCount;
+        size_t arrayLen;
+        std::vector<GLfloat> fv;
+        std::vector<GLint> iv;
+        std::vector<GLuint> uiv;
+    };
+
+    struct Block{
+        const void* data{nullptr};
+        size_t componentCount{1};
+        size_t arrayLen{1};
+    };
+
+public:
+    void send(Program* prog);
+    void check(Program* prog);
+
+    void setf(const std::string& name, const UniformSender::Block& bk);
+    void seti(const std::string& name, const UniformSender::Block& bk);
+    void setui(const std::string& name, const UniformSender::Block& bk);
+
+public:
+    DynamicArray<std::pair<std::string, Value>> values;
+};
+---
+
+--- uniform sender implemention
+//====================================
+// uniform sender implemention
+
+//-------------------
+// set uniforms
+#define SET_VAR(varName, type, byteType) do{\
+    auto& pr = values.raw_back();\
+    pr.first = name;\
+    auto& value = pr.second;\
+    value.dataType = type;\
+    value.componentCount = bk.componentCount;\
+    value.arrayLen = bk.arrayLen;\
+    value.varName.resize(bk.componentCount * bk.arrayLen);\
+    memcpy(value.varName.data(), bk.data, value.varName.size() * byteType);\
+}while(0)
+
+void UniformSender::setf(const std::string& name, const UniformSender::Block& bk){
+    mAssert(bk.componentCount <= 16);
+    SET_VAR(fv, GL_FLOAT, sizeof(GLfloat));
+}
+
+void UniformSender::seti(const std::string& name, const UniformSender::Block& bk){
+    mAssert(bk.componentCount <= 16);
+    SET_VAR(iv, GL_INT, sizeof(GLint));
+}
+
+void UniformSender::setui(const std::string& name, const UniformSender::Block& bk){
+    mAssert(bk.componentCount <= 16);
+    SET_VAR(uiv, GL_UNSIGNED_INT, sizeof(GLuint));
+}
+
+//---------------------
+// send uniforms
+#define SEND_UNIFORM_FLOAT(componentCount, location, arrayLen, data)\
+do{\
+    switch (componentCount) {\
+        case 1:\
+            glUniform1fv(location, arrayLen, (const GLfloat*)data);\
+            break;\
+        case 2:\
+            glUniform2fv(location, arrayLen, (const GLfloat*)data);\
+            break;\
+        case 3:\
+            glUniform3fv(location, arrayLen, (const GLfloat*)data);\
+            break;\
+        case 4:\
+            glUniform4fv(location, arrayLen, (const GLfloat*)data);\
+            break;\
+        case 9:\
+            glUniformMatrix3fv(location, arrayLen, false, (const GLfloat*)data);\
+            break;\
+        case 16:\
+            glUniformMatrix4fv(location, arrayLen, false, (const GLfloat*)data);\
+            break;\
+        default:\
+            mAssert(false);\
+    }\
+}while(0)
+
+#define SEND_UNIFORM_INT(componentCount, location, arrayLen, data)\
+do{\
+    switch (componentCount) {\
+        case 1:\
+            glUniform1iv(location, arrayLen, (const GLint*)data);\
+            break;\
+        case 2:\
+            glUniform2iv(location, arrayLen, (const GLint*)data);\
+            break;\
+        case 3:\
+            glUniform3iv(location, arrayLen, (const GLint*)data);\
+            break;\
+        case 4:\
+            glUniform4iv(location, arrayLen, (const GLint*)data);\
+            break;\
+        default:\
+            mAssert(false);\
+    }\
+}while(0)
+
+#define SEND_UNIFORM_UINT(componentCount, location, arrayLen, data)\
+do{\
+    switch (componentCount) {\
+        case 1:\
+            glUniform1uiv(location, arrayLen, (const GLuint*)data);\
+            break;\
+        case 2:\
+            glUniform2uiv(location, arrayLen, (const GLuint*)data);\
+            break;\
+        case 3:\
+            glUniform3uiv(location, arrayLen, (const GLuint*)data);\
+            break;\
+        case 4:\
+            glUniform4uiv(location, arrayLen, (const GLuint*)data);\
+            break;\
+        default:\
+            mAssert(false);\
+    }\
+}while(0)
+
+void UniformSender::send(Program* prog){
+    mAssert(prog->isLinked());
+
+    const auto& svTable = prog->getShaderVarTable();
+    const auto& uniformMap = svTable.getUniformMap();
+
+    for(const auto& pr : values){
+        const auto& name = pr.first;
+        const auto& value = pr.second;
+
+        mAssert(uniformMap.has(name), "failed to get the location of '%s' in shaders: '%s.*'",
+                name.c_str(), prog->getShaderTag().c_str());
+
+        auto location = uniformMap.get(name).location;
+
+        switch(value.dataType){
+            case GL_FLOAT:
+                SEND_UNIFORM_FLOAT(value.componentCount, location, value.arrayLen, value.fv.data());
+                break;
+            case GL_INT:
+                SEND_UNIFORM_INT(value.componentCount, location, value.arrayLen, value.iv.data());
+                break;
+            case GL_UNSIGNED_INT:
+                SEND_UNIFORM_UINT(value.componentCount, location, value.arrayLen, value.uiv.data());
+                break;
+            default:
+                mAssert(false);
+        }
+    };
+
+    values.clear();
+}
+
+void UniformSender::check(Program* prog){
+    mAssert(prog->isLinked());
+
+    const auto& svTable = prog->getShaderVarTable();
+    std::vector<std::string> names;
+
+    for(const auto& pr : svTable.getUniformMap().getMap()){
+        auto it = std::find_if(values.begin(), values.end(),
+            [=](const std::pair<std::string, Value>& valPr)->auto{
+                return valPr.first == pr.first;
+            });
+
+        if (it == values.end()){
+            names.push_back(pr.first);
+        }
+    }
+
+    if (!names.empty()){
+        printf("uninitialized uniforms in shaders '%s.*':\n", prog->getShaderTag().c_str());
+        for(const auto& name : names){
+            printf("%s\n", name.c_str());
+        }
+    }
+}
+---
+
+--- subroutine sender
+//-------------------------
+// subroutine sender
+class SubroutineSender{
+public:
+    void setSubroutine(int shaderType, const std::string& uniformName, const std::string& indexName);
+    void send(Program* prog);
+    void check(Program* prog);
+
+private:
+    std::map<int, std::map<std::string, std::string>>subroutineMap;
+};
+---
+
+--- subroutine sender implemention
+//-------------------------------------
+// subroutine sender implemention
+void SubroutineSender::setSubroutine(int shaderType, const std::string& uniformName, const std::string& indexName){
+    subroutineMap[shaderType][uniformName] = indexName;
+}
+
+void SubroutineSender::send(Program* prog){
+    mAssert(prog->isLinked());
+
+    const auto& svTable = prog->getShaderVarTable();
+
+    std::vector<GLuint> indices;
+    for(const auto& pr : subroutineMap){
+        int shaderType = pr.first;
+
+        const auto& uniformMap = svTable.getSubroutineUniformMap(shaderType);
+        const auto& indexMap = svTable.getSubroutineMap(shaderType);
+
+        indices.resize(uniformMap.size(), GL_INVALID_INDEX);
+
+        for(const auto& name : pr.second){
+            const auto& uniformName = name.first;
+            const auto& indexName = name.second;
+
+            mAssert(uniformMap.has(uniformName),
+                "failed to get the uniform location of '%s' in shaders '%s.*'", uniformName.c_str(),
+                prog->getShaderTag().c_str());
+
+            mAssert(indexMap.has(indexName),
+                "failed to get the subroutine index of '%s' in shaders: '%s.*'", indexName.c_str(),
+                prog->getShaderTag().c_str());
+
+            indices[uniformMap.get(uniformName).location] = indexMap.get(indexName).index;
+        }
+
+#ifdef DEBUG
+        for(auto index : indices){
+            mAssert(index != GL_INVALID_INDEX);
+        }
+#endif
+
+        glUniformSubroutinesuiv(shaderType, indices.size(), indices.data());
+    }
+}
+
+void SubroutineSender::check(Program* prog){
+    mAssert(prog->isLinked());
+
+    const auto& svTable = prog->getShaderVarTable();
+    std::vector<std::string> names;
+
+    for(const auto& shaderPr : svTable.getSubroutineUniformMap()){
+        auto type = shaderPr.first;
+
+        if (subroutineMap.find(type) == subroutineMap.end()){
+            for(const auto& pr : shaderPr.second.getMap()){
+                names.push_back(pr.first);
+            }
+        }else{
+            const auto& temp = subroutineMap.at(type);
+            for(const auto& pr : shaderPr.second.getMap()){
+                if (temp.find(pr.first) == temp.end()){
+                    names.push_back(pr.first);
+                }
+            }
+        }
+    }
+
+    if (!names.empty()){
+        fprintf(stderr, "uninitialized subroutine uniforms in shaders '%s.*':\n",
+            prog->getShaderTag().c_str());
+
+        for(const auto& name : names){
+            fprintf(stderr, "%s\n", name.c_str());
+        }
+    }
+}
+---
+
+--- sampler sender
+//----------------------
+// sampler sender
+class SamplerSender{
+    struct Texture{
+        TextureGroupPtr texGroup;
+        std::string texName;
+    };
+
+public:
+    void setSampler(const std::string& uniformName, const Texture& texture);
+
+    void send(Program* prog);
+    void check(Program* prog);
+
+private:
+    DynamicArray<std::pair<std::string, Texture>> textures;
+    std::map<std::string, int> unitMap;
+};
+---
+
+--- sampler sender implemention
+//----------------------------------
+// sampler sender implemention
+void SamplerSender::setSampler(const std::string& uniformName, const SamplerSender::Texture& texture){
+    textures.push_back({uniformName, texture});
+}
+
+void SamplerSender::send(Program* prog){
+    mAssert(prog->isLinked());
+
+    const auto& svTable = prog->getShaderVarTable();
+    const auto& samplerMap = svTable.getSamplerMap();
+
+    // set all active uniform sampler units explictly,
+    // if we don't do this, then different type samplers may have same texture unit
+    if (unitMap.empty()){
+        int unit = 0;
+        for(const auto& pr : samplerMap.getMap()){
+            glUniform1iv(pr.second.location, 1, &unit);
+            unitMap.insert({pr.first, unit++});
+        }
+    }
+    for(const auto& pr : textures){
+        auto unit = unitMap.at(pr.first);
+        const auto& texName = pr.second.texName;
+        auto texGroup = pr.second.texGroup;
+        const auto& st = texGroup->getStorage(texName);
+
+        mAssert(samplerMap.has(pr.first),
+            "failed to get the location of '%s' in shaders '%s.*'", pr.first.c_str(),
+            prog->getShaderTag().c_str());
+
+        glActiveTexture(GL_TEXTURE0 + unit);
+        glBindSampler(unit, st.sampler->getHandle());
+        glBindTexture(st.target, texGroup->getHandle(texName));
+    }
+
+    textures.clear();
+}
+
+void SamplerSender::check(Program* prog){
+    mAssert(prog->isLinked());
+
+    const auto& svTable = prog->getShaderVarTable();
+
+    std::vector<std::string> names;
+    for(const auto& pr : svTable.getSamplerMap().getMap()){
+        auto it = std::find_if(textures.begin(), textures.end(),
+            [=](const std::pair<std::string, Texture>& texPr)->auto{
+                return texPr.first == pr.first;
+            });
+        if (it == textures.end()){
+            names.push_back(pr.first);
+        }
+    }
+
+    if (!names.empty()){
+        fprintf(stderr, "uninitialized samplers in shaders '%s.*':\n", prog->getShaderTag().c_str());
+        for(const auto& name : names){
+            fprintf(stderr, "%s\n", name.c_str());
+        }
+    }
+}
+---
+
+--- program output sender
+//--------------------------
+// program output sender
+class ProgramOutputSender{
+public:
+    auto getLocation(const std::string& name) const { return outputMap.at(name); }
+    void setLocation(const std::string& name, int location) { outputMap[name] = location; }
+
+public:
+    void send(Program* prog);
+
+private:
+    std::map<std::string, int> outputMap;
+};
+---
+
+--- program output sender implemention
+void ProgramOutputSender::send(Program* prog){
+    mAssert(!prog->isLinked());
+
+    for(const auto& pr : outputMap){
+        glBindFragDataLocation(prog->getHandle(), pr.second, pr.first.c_str());
+    }
+}
+---
+
+--- program input sender
+//------------------------
+// program input sender
+class ProgramInputSender{
+public:
+    void send(Program* prog);
+};
+---
+
+--- program input sender implemention
+void ProgramInputSender::send(Program* prog){
+    mAssert(!prog->isLinked());
+
+    auto handle = prog->getHandle();
+    const auto& vertexLayout = prog->getVertexLayout();
+
+    if (vertexLayout){
+        for(const auto& pr : vertexLayout->getAttribMap()){
+            glBindAttribLocation(handle, vertexLayout->getLocation(pr.first), pr.first.c_str());
+        }
+    }
+}
+---
+
+--- binding point manager
+//------------------------
+// binding point manager
+class BindingPointMgr;
+using BindingPointMgrPtr = tow::ResourcePtr<BindingPointMgr>;
+
+class BindingPointMgr{
+private:
+    BindingPointMgr();
+
+public:
+    static const BindingPointMgrPtr&  get();
+
+public:
+    int allocate();
+    void recycle(int bp);
+
+private:
+    const int kMaxNumBindingPoints = 64;
+    std::vector<std::pair<int, bool>> bindingPoints;
+};
+---
+
+--- binding point manager implemention
+//----------------------------------------
+// binding point manager implemention
+BindingPointMgr::BindingPointMgr(){
+    for(int i = 0; i < kMaxNumBindingPoints; ++i){
+        bindingPoints.push_back({i, false});
+    }
+}
+
+const BindingPointMgrPtr& BindingPointMgr::get(){
+    static auto ptr = BindingPointMgrPtr(new BindingPointMgr());
+    return ptr;
+}
+
+int BindingPointMgr::allocate(){
+    for(auto& bp : bindingPoints){
+        if (!bp.second){
+            bp.second = true;
+            return bp.first;
+        }
+    }
+    mAssert(false, "failed to allocate binding point");
+    return -1;
+}
+
+void BindingPointMgr::recycle(int bp){
+    auto& pr = bindingPoints.at(bp);
+    pr.second = false;
+}
+---
+
+--- buffer binding
+//----------------------
+// buffer binding
+class BufferBinding{
+private:
+    BufferBinding(int target);
+
+public:
+    ~BufferBinding();
+
+public:
+    static ResourcePtr<BufferBinding> create(int target);
+
+public:
+    void bind(BufferGroupPtr group, const std::string& name);
+    void bind(BufferGroupPtr group, const std::string& name, size_t offset, size_t size);
+
+public:
+    int getBindingPoint() const { return bufferBp; }
+    int getTarget() const { return bufferTarget; }
+    const auto& getBufferGroup() const { return bufferGroup; }
+
+private:
+    int bufferBp{0};
+    int bufferTarget{0};
+    tow::BufferGroupPtr bufferGroup;
+};
+using BufferBindingPtr = ResourcePtr<BufferBinding>;
+---
+
+--- buffer binding implemention
+//----------------------------------
+// buffer binding implemention
+BufferBinding::BufferBinding(int target) : bufferTarget(target){
+    bufferBp = BindingPointMgr::get()->allocate();
+}
+
+BufferBinding::~BufferBinding(){
+    BindingPointMgr::get()->recycle(bufferBp);
+}
+
+ResourcePtr<BufferBinding> BufferBinding::create(int target){
+    return ResourcePtr<BufferBinding>(new BufferBinding(target));
+}
+
+void BufferBinding::bind(BufferGroupPtr group, const std::string& name){
+    bufferGroup = group;
+
+    auto handle = bufferGroup->getHandle(name);
+    glBindBufferBase(bufferTarget, bufferBp, handle);
+}
+
+void BufferBinding::bind(BufferGroupPtr group, const std::string& name, size_t offset, size_t size){
+    bufferGroup = group;
+
+    auto handle = bufferGroup->getHandle(name);
+    glBindBufferRange(bufferTarget, bufferBp, handle, offset, size);
+}
+---
+
+--- block sender
+//---------------------
+// block sender
+class BlockSender{
+public:
+    void bindUniformBlock(const std::string& name, BufferBindingPtr binding);
+    void bindStorageBufferBlock(const std::string& name, BufferBindingPtr binding);
+
+    void send(Program* prog);
+    void check(Program* prog);
+
+private:
+    std::map<std::string, BufferBindingPtr> uniformBlockBindingMap;
+    std::map<std::string, BufferBindingPtr> shaderStorageBufferBindingMap;
+};
+---
+
+--- block sender implemention
+//------------------------------
+// block sender implemention
+void BlockSender::bindUniformBlock(const std::string& name, BufferBindingPtr binding){
+    uniformBlockBindingMap[name] = binding;
+}
+
+void BlockSender::bindStorageBufferBlock(const std::string& name, BufferBindingPtr binding){
+    shaderStorageBufferBindingMap[name] = binding;
+}
+
+void BlockSender::send(Program* prog){
+    mAssert(prog->isLinked());
+
+    auto handle = prog->getHandle();
+    const auto& svTable = prog->getShaderVarTable();
+
+    const auto& uniformBlockIndexMap = svTable.getUniformBlockIndexMap();
+    for(const auto& pr : uniformBlockBindingMap){
+        const std::string& name = pr.first;
+
+        mAssert(uniformBlockIndexMap.has(name), "failed to get the index of '%s' in shaders: '%s.*'",
+            name.c_str(), prog->getShaderTag().c_str());
+
+        glUniformBlockBinding(handle, uniformBlockIndexMap.get(name), pr.second->getBindingPoint());
+    }
+
+    const auto& storageBlockIndexMap = svTable.getStorageBlockIndexMap();
+    for(const auto& pr : shaderStorageBufferBindingMap){
+        const std::string& name = pr.first;
+
+        mAssert(storageBlockIndexMap.has(name), "failed to get the index of '%s' in shaders: '%s.*'",
+            name.c_str(), prog->getShaderTag().c_str());
+
+        glShaderStorageBlockBinding(handle, storageBlockIndexMap.get(name), pr.second->getBindingPoint());
+    }
+}
+
+void BlockSender::check(Program* prog){
+    mAssert(prog->isLinked());
+
+    const auto& svTable = prog->getShaderVarTable();
+
+    std::vector<std::string> names;
+    for(const auto& pr : svTable.getUniformBlockIndexMap().getMap()){
+        if (uniformBlockBindingMap.find(pr.first) == uniformBlockBindingMap.end()){
+            names.push_back(pr.first);
+        }
+    }
+    for(const auto& pr : svTable.getStorageBlockIndexMap().getMap()){
+        if (shaderStorageBufferBindingMap.find(pr.first) == shaderStorageBufferBindingMap.end()){
+            names.push_back(pr.first);
+        }
+    }
+
+    if (!names.empty()){
+        fprintf(stderr, "uninitialized block in shaders '%s.*':\n", prog->getShaderTag().c_str());
+        for(const auto& name : names){
+            fprintf(stderr, "%s\n", name.c_str());
+        }
+    }
+}
+---
+
+

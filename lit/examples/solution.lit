@@ -1,0 +1,417 @@
+@comment_type // %s
+
+@s
+
+--- solution.h
+#ifndef SOLUTION_H
+#define SOLUTION_H
+
+#include "tow.h"
+
+#include "imgui_ex.h"
+
+#include "camera.h"
+
+#include "glfw3.h"
+
+#include "IconsFontAwesome5.h"
+
+class Solution{
+public:
+    //------------
+    // layout
+    enum State{
+        NORMAL = 0,
+        COLLAPSED,
+    };
+    struct Input{
+        float x{0};
+        float y{0};
+        float dx{0};
+        float dy{0};
+        float scrolly{0};
+        bool isMouseDown[3]{false};
+        bool isMouseClicked[3]{false};
+        bool isMouseReleased[3]{false};
+    };
+
+    struct Window{
+        ImVec2 pos;
+        ImVec2 size;
+        ImVec2 winPos;
+
+        bool sizeChanged{false};
+        bool focused{false};
+        bool justFocused{false};
+
+        float dt{0};
+
+        auto getRect() const { return &pos.x; }
+        auto getAspectRatio() const { return size.y / size.x; }
+    };
+
+    struct Pane{
+        std::string name;
+        float ratio{0};
+        float height{0};
+        State state{State::NORMAL};
+        Input input;
+        Window window;
+
+        void updateInput();
+        void updateWindow();
+        void update() { updateInput(); updateWindow(); }
+        auto isCollapsed() const { return state == State::COLLAPSED; }
+    };
+
+    struct Column{
+        std::string name;
+        float ratio{0};
+        std::vector<Pane> panes;
+        float width{0};
+        State state{State::NORMAL};
+    };
+
+    class Layout{
+    public:
+        using ArrangementFunc = std::function<void(Layout&, const ImVec2&, const ImVec2&)>;
+
+    public:
+        Layout(){}
+        Layout(ArrangementFunc func) : arrange(func){}
+
+    public:
+        void update(const ImVec2& initSize, const ImVec2& winSize);
+
+    public:
+        auto& getColumns() { return columns; }
+        auto& getColumn(size_t index) { return columns.at(index); }
+        auto& getPane(size_t cIndex, size_t pIndex) { return getColumn(cIndex).panes.at(pIndex); }
+        auto& getContraction() { return contraction; }
+
+        void setColumns(const std::vector<Column>& cols) { columns = cols; }
+        void setContraction(const ImVec4& contract) { contraction = contract; }
+        void setFunc(ArrangementFunc func) { arrange = func; }
+
+    protected:
+        std::vector<Column> columns;
+        ArrangementFunc arrange{[](Layout&, const ImVec2&, const ImVec2&){}};
+        ImVec4 contraction;
+    };
+
+    //---------------
+    // project
+    class Project{
+    public:
+        Project(const std::string& n);
+        virtual ~Project(){}
+
+    public:
+        virtual void setup() {};
+        virtual void exit() {};
+        virtual void show(size_t cIndex, size_t pIndex) = 0;
+
+        virtual void manipulateCamera(CameraPtr camera, const Solution::Pane& pane);
+
+    public:
+        const auto& getName() const { return projName; }
+        auto& getLayout() { return projLayout; }
+
+        void setDroppedFilenames(std::vector<std::string>* ptr) { droppedFiles = ptr; }
+
+    protected:
+        Layout projLayout;
+        std::string projName;
+        std::vector<std::string>* droppedFiles{nullptr};
+    };
+    using ProjectPtr = tow::ResourcePtr<Project>;
+
+//---------------
+// solution
+private:
+    Solution(GLFWwindow* fwWindow, const ImVec2& size);
+
+public:
+    static tow::ResourcePtr<Solution> create(GLFWwindow* fwWindow, const ImVec2& size);
+
+public:
+    template<class T>
+    void add(const std::string& name) {
+        projects.push_back(ProjectPtr(new T(name)));
+    }
+
+    void start(size_t index);
+    void show(int width, int height);
+    void destroy() { projects.clear(); }
+
+private:
+    std::vector<ProjectPtr> projects;
+    std::vector<std::string> droppedFiles;
+    size_t curStartIndex{(size_t)-1};
+    ImVec2 initialSize;
+};
+
+#endif
+---
+
+--- solution.cpp
+#include "solution.h"
+
+#include "IconsFontAwesome5.h"
+
+using namespace ImGui;
+
+static std::vector<std::string> s_droppedFilenames;
+
+//------------------------
+// pane implemention
+void Solution::Pane::updateWindow(){
+    auto& io = GetIO();
+    auto fbSize = io.DisplayFramebufferScale * io.DisplaySize;
+
+    auto winSize = GetWindowSize();
+
+    window.pos = GetWindowPos();
+    window.winPos = window.pos;
+    window.pos.y = fbSize.y - window.pos.y - winSize.y;
+
+    window.sizeChanged =
+        (size_t)winSize.x != (size_t)window.size.x &&
+        (size_t)winSize.y != (size_t)window.size.y;
+
+    window.size = winSize;
+
+    window.justFocused = !window.focused && IsWindowFocused();
+    window.focused = IsWindowFocused();
+
+    window.dt = io.DeltaTime;
+}
+
+void Solution::Pane::updateInput(){
+    auto& io = GetIO();
+    auto displaySize = io.DisplaySize * io.DisplayFramebufferScale;
+
+    input.x = io.MousePos.x;
+    input.y = displaySize.y - io.MousePos.y;
+    input.dx = io.MouseDelta.x;
+    input.dy = io.MouseDelta.y;
+    input.scrolly = io.MouseWheel;
+
+    for(int i = ImGuiMouseButton_Left; i <= ImGuiMouseButton_Middle; ++i){
+        input.isMouseDown[i] = IsMouseDown(i);
+        input.isMouseClicked[i] = IsMouseClicked(i);
+        input.isMouseReleased[i] = IsMouseReleased(i);
+    }
+}
+
+//---------------------
+// layout implemetion
+void Solution::Layout::update(const ImVec2& initSize, const ImVec2& winSize){
+    for(auto& column : columns){
+        column.width = column.ratio * winSize.x;
+        for(auto& pane : column.panes){
+            pane.height = pane.ratio * winSize.y;
+        }
+    }
+
+    arrange(*this, initSize, winSize);
+}
+
+//-----------------------
+// project implemention
+Solution::Project::Project(const std::string& n) : projName(n) {}
+
+void Solution::Project::manipulateCamera(CameraPtr camera, const Solution::Pane& pane){
+    const auto& window = pane.window;
+    const auto& input = pane.input;
+
+    if (!window.focused){
+        return;
+    }
+
+    if (input.x >= window.pos.x && input.x <= window.pos.x + window.size.x
+        && input.y >= window.pos.y && input.y <= window.pos.y + window.size.y){
+
+        if (IsMouseDown(ImGuiMouseButton_Left)){
+             camera->circle(-input.dx * 0.1f, -input.dy * 0.1f);
+        }
+        if (IsMouseDown(ImGuiMouseButton_Right)){
+            camera->move(-input.dx * 0.0005f, input.dy * 0.0005f);
+        }
+        if (input.scrolly){
+            camera->pull(input.scrolly * 0.05f);
+        }
+    }
+}
+
+//=================================
+// solution implemention
+static void initImGuiStyle();
+static void loadFonts();
+
+Solution::Solution(GLFWwindow* fwWindow, const ImVec2& size) : initialSize(size) {
+    loadFonts();
+    initImGuiStyle();
+
+    glfwSetDropCallback(fwWindow, [](GLFWwindow*, int num, const char** filenames){
+        s_droppedFilenames.clear();
+        for(int i = 0; i < num; ++i){
+            s_droppedFilenames.push_back(filenames[i]);
+        }
+    });
+}
+
+tow::ResourcePtr<Solution> Solution::create(GLFWwindow* fwWindow, const ImVec2& size) {
+    return tow::ResourcePtr<Solution>(new Solution(fwWindow, size));
+}
+
+void Solution::start(size_t index){
+    projects.at(index)->setup();
+    projects.at(index)->setDroppedFilenames(&s_droppedFilenames);
+    curStartIndex = index;
+}
+
+void Solution::show(int width, int height){
+    // do nothing when window is minimized
+    if (width == 0 || height == 0){
+        return;
+    }
+
+    // commons
+    float menuHeight = 0;
+
+    //---------------------
+    // menu bar
+    PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1);
+    if (BeginMainMenuBar()){
+        if (BeginMenu("Projects")){
+            for(size_t i = 0; i < projects.size(); ++i){
+                if (MenuItem(projects.at(i)->getName().c_str(), nullptr, i == curStartIndex)){
+                    projects.at(curStartIndex)->exit();
+                    start(i);
+                }
+            }
+            EndMenu();
+        }
+        menuHeight = GetWindowHeight();
+        EndMainMenuBar();
+    }
+    PopStyleVar();
+
+    //--------------------
+    // current project
+    if (curStartIndex == -1) return;
+
+    auto projectPos = ImVec2(0, menuHeight);
+    auto projectSize = ImVec2((float)width, (float)height - menuHeight);
+    auto curProject = projects.at(curStartIndex);
+    auto& curLayout = curProject->getLayout();
+
+    const auto& contraction = curLayout.getContraction();
+    projectPos = projectPos + ImVec2(contraction.x, contraction.y);
+    projectSize = projectSize - ImVec2(contraction.z, contraction.w);
+
+    curLayout.update(ImVec2(initialSize.x, initialSize.y - menuHeight) -
+        ImVec2(contraction.z, contraction.w), projectSize);
+
+    auto numColumns = curLayout.getColumns().size();
+
+    BeginSplitter(curProject->getName(), projectPos, projectSize, numColumns);
+
+    for(size_t cIndex = 0; cIndex < numColumns; ++cIndex){
+        auto& column = curLayout.getColumn(cIndex);
+
+        BeginColumnGroup(column.name, column.width);
+
+        for(size_t pIndex = 0; pIndex < column.panes.size(); ++pIndex){
+            curProject->show(cIndex, pIndex);
+        }
+
+        EndColumnGroup();
+    }
+
+    EndSplitter();
+}
+
+void loadFonts(){
+    ImFontConfig fontConfig;
+    ImGui::GetIO().Fonts->AddFontFromFileTTF("assets/fonts/Roboto-Medium.ttf", 16.0f, &fontConfig);
+
+    ImFontConfig iconConfig;
+    iconConfig.MergeMode = true;
+    iconConfig.GlyphMinAdvanceX = 13.0f;
+
+    static const ImWchar iconRanges[] = { ICON_MIN_FA, ICON_MAX_FA, 0 };
+
+    ImGuiIO& io = GetIO();
+    io.Fonts->AddFontFromFileTTF("assets/fonts/" FONT_ICON_FILE_NAME_FAS, 13.0f, &iconConfig, iconRanges);
+    io.Fonts->Build();
+}
+
+void initImGuiStyle(){
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.ChildRounding = 0.f;
+    style.GrabRounding = 0.f;
+    style.WindowRounding = 0.f;
+    style.ScrollbarRounding = 3.f;
+    style.FrameRounding = 3.f;
+    style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
+    style.ScrollbarSize = 15.0f;
+    style.WindowPadding = ImVec2(8.0f, 8.0f);
+    style.TabBorderSize = 1.0f;
+    style.TabRounding = 0.0f;
+    style.SelectableTextAlign = {0, 0.5f};
+
+    ImVec4* colors = style.Colors;
+    colors[ImGuiCol_Text]                   = ImVec4(0.95f, 0.95f, 0.95f, 1.00f);
+    colors[ImGuiCol_TextDisabled]           = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
+    colors[ImGuiCol_WindowBg]               = ImVec4(0.26f, 0.26f, 0.26f, 0.95f);
+    colors[ImGuiCol_ChildBg]                = ImVec4(0.00f, 0.00f, 0.00f, 0.02f);
+    colors[ImGuiCol_PopupBg]                = ImVec4(0.26f, 0.26f, 0.26f, 1.00f);
+    colors[ImGuiCol_Border]                 = ImVec4(1.00f, 1.00f, 1.00f, 0.11f);
+    colors[ImGuiCol_BorderShadow]           = ImVec4(0.26f, 0.26f, 0.26f, 0.00f);
+    colors[ImGuiCol_FrameBg]                = ImVec4(0.16f, 0.16f, 0.16f, 1.00f);
+    colors[ImGuiCol_FrameBgHovered]         = ImVec4(0.16f, 0.16f, 0.16f, 1.00f);
+    colors[ImGuiCol_FrameBgActive]          = ImVec4(0.16f, 0.16f, 0.16f, 1.00f);
+    colors[ImGuiCol_TitleBg]                = ImVec4(0.41f, 0.41f, 0.41f, 1.00f);
+    colors[ImGuiCol_TitleBgActive]          = ImVec4(0.41f, 0.41f, 0.41f, 1.00f);
+    colors[ImGuiCol_TitleBgCollapsed]       = ImVec4(0.36f, 0.36f, 0.36f, 1.00f);
+    colors[ImGuiCol_MenuBarBg]              = ImVec4(0.26f, 0.26f, 0.26f, 1.00f);
+    colors[ImGuiCol_ScrollbarBg]            = ImVec4(0.21f, 0.21f, 0.21f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrab]          = ImVec4(0.36f, 0.36f, 0.36f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrabHovered]   = ImVec4(0.36f, 0.36f, 0.36f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrabActive]    = ImVec4(0.36f, 0.36f, 0.36f, 1.00f);
+    colors[ImGuiCol_CheckMark]              = ImVec4(0.78f, 0.78f, 0.78f, 1.00f);
+    colors[ImGuiCol_SliderGrab]             = ImVec4(0.74f, 0.74f, 0.74f, 1.00f);
+    colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.74f, 0.74f, 0.74f, 1.00f);
+    colors[ImGuiCol_Button]                 = ImVec4(0.36f, 0.36f, 0.36f, 1.00f);
+    colors[ImGuiCol_ButtonHovered]          = ImVec4(0.43f, 0.43f, 0.43f, 1.00f);
+    colors[ImGuiCol_ButtonActive]           = ImVec4(0.11f, 0.11f, 0.11f, 1.00f);
+    colors[ImGuiCol_Header]                 = ImVec4(1.00f, 1.00f, 1.00f, 0.12f);
+    colors[ImGuiCol_HeaderHovered]          = ImVec4(0.24f, 0.45f, 0.60f, 1.00f);
+    colors[ImGuiCol_HeaderActive]           = ImVec4(0.24f, 0.45f, 0.60f, 1.00f);
+    colors[ImGuiCol_Separator]              = ImVec4(0.52f, 0.52f, 0.52f, 0.50f);
+    colors[ImGuiCol_SeparatorHovered]       = ImVec4(0.75f, 0.75f, 0.75f, 0.78f);
+    colors[ImGuiCol_SeparatorActive]        = ImVec4(0.75f, 0.75f, 0.75f, 1.00f);
+    colors[ImGuiCol_ResizeGrip]             = ImVec4(0.36f, 0.36f, 0.36f, 1.00f);
+    colors[ImGuiCol_ResizeGripHovered]      = ImVec4(0.98f, 0.98f, 0.98f, 1.00f);
+    colors[ImGuiCol_ResizeGripActive]       = ImVec4(0.98f, 0.98f, 0.98f, 1.00f);
+    colors[ImGuiCol_Tab]                    = ImVec4(0.35f, 0.35f, 0.35f, 0.86f);
+    colors[ImGuiCol_TabHovered]             = ImVec4(0.45f, 0.45f, 0.45f, 0.80f);
+    colors[ImGuiCol_TabActive]              = ImVec4(0.51f, 0.51f, 0.51f, 0.92f);
+    colors[ImGuiCol_TabUnfocused]           = ImVec4(0.15f, 0.15f, 0.15f, 0.97f);
+    colors[ImGuiCol_TabUnfocusedActive]     = ImVec4(0.42f, 0.42f, 0.42f, 1.00f);
+    colors[ImGuiCol_PlotLines]              = ImVec4(0.39f, 0.39f, 0.39f, 1.00f);
+    colors[ImGuiCol_PlotLinesHovered]       = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
+    colors[ImGuiCol_PlotHistogram]          = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
+    colors[ImGuiCol_PlotHistogramHovered]   = ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
+    colors[ImGuiCol_TextSelectedBg]         = ImVec4(0.32f, 0.52f, 0.65f, 1.00f);
+    colors[ImGuiCol_DragDropTarget]         = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
+    colors[ImGuiCol_NavHighlight]           = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+    colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
+    colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.57f, 0.57f, 0.57f, 0.54f);
+}
+
+
+---

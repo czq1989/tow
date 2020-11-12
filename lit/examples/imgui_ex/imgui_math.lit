@@ -1,0 +1,77 @@
+
+--- imgui math
+//--------------------
+// imgui math
+inline ImVec2 operator*(const ImVec2& lhs, const ImVec2& rhs);
+
+ImVec2 operator*(const ImVec2& lhs, const ImVec2& rhs){
+    return ImVec2(lhs.x * rhs.x, lhs.y * rhs.y);
+}
+
+inline ImVec2 operator*(float lhs, const ImVec2& rhs);
+
+ImVec2 operator*(float lhs, const ImVec2& rhs){
+    return ImVec2(lhs * rhs.x, lhs * rhs.y);
+}
+
+inline ImVec2 operator*(const ImVec2& lhs, float rhs);
+
+ImVec2 operator*(const ImVec2& lhs, float rhs){
+    return ImVec2(lhs.x * rhs, lhs.y * rhs);
+}
+
+inline ImVec2 operator+(const ImVec2& lhs, const ImVec2& rhs);
+
+ImVec2 operator+(const ImVec2& lhs, const ImVec2& rhs){
+    return ImVec2(lhs.x + rhs.x, lhs.y + rhs.y);
+}
+
+inline ImVec2 operator-(const ImVec2& lhs, const ImVec2& rhs);
+
+ImVec2 operator-(const ImVec2& lhs, const ImVec2& rhs){
+    return ImVec2(lhs.x - rhs.x, lhs.y - rhs.y);
+}
+
+struct ImVec3{
+    ImVec3() : x(0),y(0),z(0){}
+    explicit ImVec3(float val) : x(val),y(val),z(val){}
+    ImVec3(float xx, float yy) : x(xx),y(yy),z(0){}
+    ImVec3(float xx, float yy, float zz) : x(xx),y(yy),z(zz){}
+
+    ImVec3 operator+(const ImVec3& rhs) const{
+        return ImVec3(x+rhs.x, y+rhs.y, z+rhs.z);
+    }
+
+    ImVec3& operator+=(const ImVec3& rhs){
+        x += rhs.x;
+        y += rhs.y;
+        z += rhs.z;
+        return *this;
+    }
+
+    ImVec3 operator-(const ImVec3& rhs) const{
+        return ImVec3(x-rhs.x, y-rhs.y, z-rhs.z);
+    }
+
+    ImVec3 operator-=(const ImVec3& rhs){
+        x -= rhs.x;
+        y -= rhs.y;
+        z -= rhs.z;
+        return *this;
+    }
+
+    ImVec3 operator*(const ImVec3& rhs) const{
+        return ImVec3(x*rhs.x, y*rhs.y, z*rhs.z);
+    }
+
+    ImVec3& operator*=(const ImVec3& rhs){
+        x *= rhs.x;
+        y *= rhs.y;
+        z *= rhs.z;
+        return *this;
+    }
+
+    float x, y, z;
+};
+---
+

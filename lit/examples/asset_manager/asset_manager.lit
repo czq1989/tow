@@ -1,0 +1,528 @@
+@comment_type // %s
+
+@s
+
+--- asset_manager.h
+#ifndef ASSET_MANAGER_H
+#define ASSET_MANAGER_H
+
+#include "tow.h"
+#include "gltf_model.h"
+#include "imstb_truetype.h"
+
+@{font cache}
+@{image cache}
+@{model cache}
+@{asset manager}
+
+#endif
+---
+
+--- asset_manager.cpp
+#include "asset_manager.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_image.h"
+#include "stb_image_write.h"
+#include "imstb_truetype.h"
+
+#include "example_util.h"
+
+using namespace glm;
+using namespace tow;
+
+@{font cache implemention}
+@{image cache implemention}
+@{model cache implemention}
+@{asset manager implemention}
+---
+
+--- font cache
+//-------------------
+// font cache
+class FontCache;
+using FontCachePtr = tow::ResourcePtr<FontCache>;
+
+class FontCache{
+public:
+    static const int kTexWidth{1024};
+    static const int kTexHeight{1024};
+
+    struct Glyph{
+        tow::TextureGroupPtr texGroup;
+        std::string texName;
+        glm::vec4 uvRect{0, 0, 1, 1};
+        glm::vec2 pos{0};
+        glm::vec2 size{0};
+        float advance{0};
+        float lineGap{0};
+    };
+    struct FontInfo{
+        int ascent{0};
+        int descent{0};
+        int lineGap{0};
+        std::vector<uint8_t> buffer;
+        stbtt_fontinfo font;
+    };
+    struct Record{
+        std::string texName;
+        glm::ivec2 offset{0};
+        int maxHeight{0};
+    };
+
+public:
+    FontCache();
+
+public:
+    const auto& getFontInfo(const std::string& fontName) const { return fontMap.at(fontName); }
+    const Glyph& getGlyph(int cp, const std::string& fontName, int fontSize);
+    const auto& getTexGroup() const { return texGroup; }
+
+    void destroy() {
+        fontMap.clear();
+        glyphMap.clear();
+        recordMap.clear();
+        texGroup->clear();
+        sampler = nullptr;
+    }
+
+private:
+    std::map<std::string, FontInfo> fontMap;
+    std::map<std::string, Glyph> glyphMap;
+    std::map<std::string, Record> recordMap;
+    tow::TextureGroupPtr texGroup;
+    tow::SamplerParamPtr sampler;
+};
+---
+
+--- font cache implemention
+//===============================
+// font cache implemention
+FontCache::FontCache(){
+    texGroup = TexGroup::create();
+    sampler = SamplerParam::create();
+}
+
+const FontCache::Glyph& FontCache::getGlyph(int cp, const std::string& fontName, int fontSize){
+    //----------
+    // add font
+    if (fontMap.find(fontName) == fontMap.end()){
+        auto fp = fopen(fontName.c_str(), "rb");
+        if (!fp){
+            fprintf(stderr, "failed to open '%s'\n", fontName.c_str());
+
+            static Glyph emptyGlyph;
+            return emptyGlyph;
+        }
+
+        // fill buffer
+        fseek(fp, 0, SEEK_END);
+        std::vector<uint8_t> buffer(ftell(fp) + 1, 0);
+        rewind(fp);
+        fread(buffer.data(), 1, buffer.size(), fp);
+        fclose(fp);
+
+        // init font
+        auto& fontInfo = fontMap[fontName];
+        fontInfo.buffer = std::move(buffer);
+        stbtt_InitFont(&fontInfo.font, &fontInfo.buffer[0], 0);
+        stbtt_GetFontVMetrics(&fontInfo.font, &fontInfo.ascent, &fontInfo.descent, &fontInfo.lineGap);
+    }
+
+    //-------------
+    // get glyph
+    assert(fontSize);
+
+    const auto& fontInfo = fontMap.at(fontName);
+    auto recordKey = fontName + std::to_string(fontSize);
+    auto glyphKey = recordKey + std::to_string(cp);
+
+    auto createTex = [&, this](const std::string& fontName)->std::string{
+        std::string texName;
+        strFormat(texName, "%s_%u", fontName.c_str(), texGroup->getStorageMap().size());
+        texGroup->create2D(texName, {GL_TEXTURE_2D, 1, GL_R8, sampler, kTexWidth, kTexHeight});
+        return texName;
+    };
+
+    if (glyphMap.find(glyphKey) == glyphMap.end()){
+        // get record
+        if (recordMap.find(recordKey) == recordMap.end()){
+            recordMap[recordKey] = {createTex(fontName)};
+        }
+        auto& record = recordMap.at(recordKey);
+
+        //---------------------
+        // glyph info
+        float minAdvance = 1.0f;
+        auto scale = stbtt_ScaleForPixelHeight(&fontInfo.font, (float)fontSize);
+        auto& glyph = glyphMap[glyphKey];
+
+        glyph.texGroup = texGroup;
+        glyph.lineGap = fontInfo.lineGap * scale;
+
+        // horizontal metrics
+        auto lsb{0};// left side bearing
+        auto advance{0};
+        stbtt_GetCodepointHMetrics(&fontInfo.font, cp, &advance, &lsb);
+        glyph.advance = max(minAdvance, roundf(advance * scale));
+
+        // glyph quad
+        auto x0{0}, y0{0}, x1{0}, y1{0};
+        stbtt_GetCodepointBitmapBox(&fontInfo.font, cp, scale, scale, &x0, &y0, &x1, &y1);
+
+        // assume that the glyph pivot is (0, 1)
+         glyph.pos = vec2{x0, fontInfo.ascent * scale + y0};
+
+        // glyph bitmap
+        ivec2 bitmapSize{x1 - x0, y1 - y0};
+        bitmapSize = max(ivec2(glyph.advance, fontSize), bitmapSize);
+        glyph.size = vec2(bitmapSize);
+
+        std::vector<uint8_t> pixels(bitmapSize.x * bitmapSize.y, 0);
+        stbtt_MakeCodepointBitmap(&fontInfo.font, &pixels[0], bitmapSize.x, bitmapSize.y,
+            bitmapSize.x, scale, scale, cp);
+
+        // write to texture
+        const int extraSpacing{2};
+        auto& offset = record.offset;
+
+        if (offset.x + bitmapSize.x + 2 * extraSpacing > kTexWidth){
+            assert(record.maxHeight);
+            offset.x = 0;
+            offset.y += record.maxHeight;
+        }
+        if (offset.y + bitmapSize.y + 2 * extraSpacing > kTexHeight){
+            record = {createTex(fontName)};
+        }
+        if (bitmapSize.y + extraSpacing > record.maxHeight){
+            record.maxHeight = bitmapSize.y + 2 * extraSpacing;
+        }
+
+        tow::TexGroup::Block bk = {
+            &pixels[0],
+            (size_t)(record.offset.x + extraSpacing), (size_t)(record.offset.y + extraSpacing), 0,
+            bitmapSize.x, bitmapSize.y
+        };
+        texGroup->write2D(record.texName, bk, {GL_RED});
+
+        glyph.texName = record.texName;
+
+        glyph.uvRect.x = (float)(record.offset.x + extraSpacing);
+        glyph.uvRect.y = (float)(record.offset.y + bitmapSize.y + extraSpacing);
+        glyph.uvRect.z = (float)bitmapSize.x;
+        glyph.uvRect.w = -(float)bitmapSize.y;
+
+        record.offset.x += bitmapSize.x + 2 * extraSpacing;
+    }
+    return glyphMap.at(glyphKey);
+}
+---
+
+--- image cache
+//--------------------
+// image cache
+class ImageCache{
+public:
+    const char* cubeMapFaceNames[6] = {
+        "posx", "negx", "posy", "negy", "posz", "negz"
+    };
+
+public:
+    struct Image{
+        std::vector<void*> pixelPtrs;
+        int width{0};
+        int height{0};
+        int componentCount{0};
+    };
+
+    struct Texture{
+        tow::TextureGroupPtr texGroup;
+        std::string texName;
+        tow::SamplerParamPtr sp;
+    };
+public:
+    ImageCache();
+
+public:
+    // read
+    void loadImage8(const std::string& filename, const Texture& tex = {}, bool flipV = false);
+    void loadImage16(const std::string& filename, const Texture& tex = {}, bool flipV = false);
+    void loadImagef(const std::string& filename, const Texture& tex = {}, bool flipV = false);
+
+    // write
+    void writeImage(const std::string& filename, int width, int height, int component, const void* data);
+
+    // remove
+    void removeImage(const std::string& filename);
+    void destroy();
+
+    // getter
+    const auto& getImage(const std::string& filename) const { return imageMap.at(filename); }
+
+private:
+    using stbImageLoader = std::function<void*(const char*, int*, int*, int*, int)>;
+
+    void loadImage(stbImageLoader loader, const std::string& filename, const Texture& tex,
+        int bits, int componentType, bool flipV);
+
+private:
+    std::map<std::string, Image> imageMap;
+    tow::SamplerParamPtr defaultSampler;
+};
+---
+
+--- image cache implemention
+//----------------------------
+// image cache implemention
+ImageCache::ImageCache(){
+    defaultSampler = tow::SamplerParam::create();
+}
+
+void ImageCache::removeImage(const std::string& filename){
+    auto& image = imageMap.at(filename);
+    for(auto ptr : image.pixelPtrs){
+        stbi_image_free(ptr);
+    }
+    imageMap.erase(filename);
+}
+
+void ImageCache::destroy(){
+    for(auto& pr : imageMap){
+        for(auto p : pr.second.pixelPtrs){
+            stbi_image_free(p);
+        }
+    }
+    imageMap.clear();
+    defaultSampler = nullptr;
+}
+
+
+void ImageCache::loadImage(stbImageLoader loader, const std::string& filename,
+    const ImageCache::Texture& tex, int bits, int componentType, bool flipV){
+
+    constexpr int reqComp = 4; // for compatibility
+
+    auto it = imageMap.find(filename);
+    if (it == imageMap.end()){
+        auto lastFlip = stbi_is_flip_vertically_on_load();
+        stbi_set_flip_vertically_on_load(flipV);
+
+        std::string faceFilename;
+
+        Image image;
+        if (filename.find("%s") != std::string::npos){// cubemap
+            for(int i = 0; i < 6; ++i){
+                strFormat(faceFilename, filename.c_str(), ImageCache::cubeMapFaceNames[i]);
+
+                auto data = loader(faceFilename.c_str(), &image.width, &image.height, &image.componentCount, reqComp);
+                if (data){
+                    image.pixelPtrs.push_back(data);
+                }else{
+                    fprintf(stderr, "failed to open '%s'\n", faceFilename.c_str());
+                }
+            }
+        }else{
+            auto data = loader(filename.c_str(), &image.width, &image.height, &image.componentCount, reqComp);
+            if (data){
+                image.pixelPtrs.push_back(data);
+            }else{
+                fprintf(stderr, "failed to open '%s'\n", filename.c_str());
+            }
+        }
+
+        if (!image.pixelPtrs.empty()){
+            imageMap.insert({filename, image});
+        }
+
+        stbi_set_flip_vertically_on_load(lastFlip);
+    }
+
+    if (tex.texGroup && imageMap.find(filename) != imageMap.end()){
+        tow::SamplerParamPtr sampler = tex.sp;
+        if (!sampler){
+            sampler = defaultSampler;
+        }
+
+        auto format = getTexFormat({reqComp, bits, componentType});
+        const auto& image = imageMap.at(filename);
+
+        if (image.pixelPtrs.size() == 6){
+            std::vector<TexGroup::Block> bks;
+            for(auto p : image.pixelPtrs){
+                bks.push_back({p});
+            }
+            tex.texGroup->create2D(tex.texName,
+                {GL_TEXTURE_CUBE_MAP, 1, format.second, sampler, image.width, image.height});
+            tex.texGroup->writeCubeMap(tex.texName, bks, {format.first, 0, componentType});
+        }else{
+            tex.texGroup->create2D(tex.texName,
+                {GL_TEXTURE_2D, 1, format.second, sampler, image.width, image.height});
+            tex.texGroup->write2D(tex.texName, {image.pixelPtrs[0]}, {format.first, 0, componentType});
+        }
+    }
+}
+
+void ImageCache::loadImage8(const std::string& filename, const ImageCache::Texture& tex, bool flipV){
+    loadImage(stbi_load, filename, tex, 8, GL_UNSIGNED_BYTE, flipV);
+}
+
+void ImageCache::loadImage16(const std::string& filename, const ImageCache::Texture& tex, bool flipV){
+    loadImage(stbi_load_16, filename, tex, 16, GL_UNSIGNED_SHORT, flipV);
+}
+
+void ImageCache::loadImagef(const std::string& filename, const ImageCache::Texture& tex, bool flipV){
+    loadImage(stbi_loadf, filename, tex, 32, GL_FLOAT, flipV);
+}
+
+void ImageCache::writeImage(const std::string& filename, int width, int height, int component, const void* data){
+    auto suffix = getSuffix(filename);
+    int ret{0};
+
+    if (suffix == "png"){
+        ret = stbi_write_png(filename.c_str(), width, height, component, data, 0);
+    }else if (suffix == "jpg"){
+        // quality is between 1 and 100. Higher quality looks better but results in a bigger image.
+        ret = stbi_write_jpg(filename.c_str(), width, height, component, data, 1);
+    }else if (suffix == "tga"){
+        ret = stbi_write_tga(filename.c_str(), width, height, component, data);
+    }else if (suffix == "hdr"){
+        stbi_write_hdr(filename.c_str(), width, height, component, (const float*)data);
+    }else{
+        assert(false && "unsupported image format");
+    }
+    assert(ret);
+}
+---
+
+--- model cache
+//----------------
+// model cache
+class ModelCache{
+public:
+    const size_t kMaxNumCacheModels = 10;
+
+public:
+    GltfModelPtr loadModel(const std::string& filename, const std::vector<tow::Shader>& shaders);
+
+    void destroy();
+
+private:
+    std::map<std::string, tinygltf::Model*> modelMap;
+};
+---
+
+--- model cache implemention
+void ModelCache::destroy(){
+    for(auto pr : modelMap){
+        delete pr.second;
+    }
+    modelMap.clear();
+}
+
+GltfModelPtr ModelCache::loadModel(const std::string& filename, const std::vector<tow::Shader>& shaders){
+    auto it = modelMap.find(filename);
+    if (it == modelMap.end()){
+        // check model number limit
+        if (modelMap.size() >= kMaxNumCacheModels){
+            for(auto pr : modelMap){
+                delete pr.second;
+            }
+            modelMap.clear();
+        }
+
+        //---------------------
+        // load model
+        std::string err;
+        std::string warn;
+        tinygltf::TinyGLTF loader;
+
+        auto tfModel = new tinygltf::Model();
+
+        auto pos = filename.find_last_of('.');
+        assert(pos != std::string::npos);
+
+        if (filename.substr(pos) == ".gltf") {
+            loader.LoadASCIIFromFile(tfModel, &err, &warn, filename);
+        }else{
+            loader.LoadBinaryFromFile(tfModel, &err, &warn, filename);
+        }
+
+        if (!warn.empty()) {
+            fprintf(stderr, "%s\n", warn.c_str());
+        }
+        if (!err.empty()) {
+            fprintf(stderr, "%s\n", err.c_str());
+        }
+
+        modelMap.insert({filename, tfModel});
+    }
+
+    return GltfModel::create(modelMap.at(filename), shaders);
+}
+---
+
+--- asset manager
+//-------------------------
+// asset manager
+class AssetManager;
+using AssetManagerPtr = tow::ResourcePtr<AssetManager>;
+
+class AssetManager{
+public:
+    static const AssetManagerPtr& get();
+
+private:
+    AssetManager();
+
+public:
+    void destroy();
+
+public:
+    const auto& getModelCache() const { return modelCache; }
+    const auto& getFontCache() const { return fontCache; }
+    const auto& getImageCache() const { return imageCache; }
+
+private:
+    tow::ResourcePtr<ModelCache> modelCache;
+    tow::ResourcePtr<FontCache> fontCache;
+    tow::ResourcePtr<ImageCache> imageCache;
+};
+
+#define ModelAsset() AssetManager::get()->getModelCache()
+#define FontAsset() AssetManager::get()->getFontCache()
+#define ImageAsset() AssetManager::get()->getImageCache()
+---
+
+--- asset manager implemention
+//------------------------------
+// asset manager implemention
+AssetManager::AssetManager(){
+    modelCache = tow::ResourcePtr<ModelCache>(new ModelCache());
+    fontCache = tow::ResourcePtr<FontCache>(new FontCache());
+    imageCache = tow::ResourcePtr<ImageCache>(new ImageCache());
+}
+
+const AssetManagerPtr& AssetManager::get(){
+    static auto mgr = AssetManagerPtr(new AssetManager());
+    return mgr;
+}
+
+void AssetManager::destroy(){
+    fontCache->destroy();
+    imageCache->destroy();
+    modelCache->destroy();
+}
+---
+
+
+
+
+
+
+
+
+
+
+

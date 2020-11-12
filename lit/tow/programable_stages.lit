@@ -1,0 +1,628 @@
+
+--- programable stages
+//========================
+// programable stages
+
+@{sampler parameter}
+@{texture}
+@{shader}
+@{shader variable}
+@{program}
+---
+
+--- programable stages implemention
+//=================================
+// programable stages implemention
+
+@{sampler parameter implemention}
+@{texture implemention}
+@{shader implemention}
+@{shader variable implemention}
+@{program implemention}
+---
+
+--- sampler parameter
+//----------------------
+// sampler parameter
+class SamplerParam{
+    friend class SamplerSender;
+
+private:
+    SamplerParam() {}
+public:
+    ~SamplerParam();
+
+public:
+    static ResourcePtr<SamplerParam> create();
+
+public:
+    void set(int paramName, const float* params);
+    void set(int paramName, const int* params);
+    void set(int paramName, float params) { set(paramName, &params); }
+    void set(int paramName, int params) { set(paramName, &params); }
+
+    bool hasMipmap() const { return hasMipmapParam; }
+
+private:
+    auto getHandle() const { return handle; }
+
+private:
+    GLuint handle{0};
+    bool hasMipmapParam{false};
+};
+using SamplerParamPtr = ResourcePtr<SamplerParam>;
+---
+
+--- sampler parameter implemention
+//------------------------------------
+// sampler parameter implemention
+SamplerParam::~SamplerParam(){
+    DEL_OBJECT(glDeleteSamplers, handle);
+}
+
+ResourcePtr<SamplerParam> SamplerParam::create(){
+    auto sp = new SamplerParam();
+
+    GEN_OBJECT(glGenSamplers, sp->handle);
+    sp->set(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    sp->set(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    sp->set(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    sp->set(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    sp->set(GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    return SamplerParamPtr(sp);
+}
+
+void SamplerParam::set(int paramName, const float* params){
+    glSamplerParameterfv(handle, paramName, params);
+}
+
+void SamplerParam::set(int paramName, const int* params){
+    glSamplerParameteriv(handle, paramName, params);
+
+    int param = params[0];
+    if (paramName == GL_TEXTURE_MIN_FILTER){
+        hasMipmapParam = param == GL_NEAREST_MIPMAP_NEAREST ||
+                    param == GL_LINEAR_MIPMAP_NEAREST ||
+                    param == GL_NEAREST_MIPMAP_LINEAR ||
+                    param == GL_LINEAR_MIPMAP_LINEAR;
+    }
+}
+---
+
+--- texture
+//-------------
+// texture
+class TexGroup{
+    friend class Framebuffer;
+    friend class SamplerSender;
+
+public:
+    struct Item2{
+        int pixelFormat{0};
+        size_t level{0};
+        int dataType{GL_UNSIGNED_BYTE};
+    };
+    struct Block{
+        const void* data{nullptr};
+        size_t xoffset{0};
+        size_t yoffset{0};
+        size_t zoffset{0};
+        int width{0};
+        int height{0};
+        int depth{0};
+    };
+    struct Storage{
+        int target{0};
+        size_t levels{1};
+        int texelFormat{0};
+        SamplerParamPtr sampler;
+        int width{0};
+        int height{0};
+        int depth{0};
+    };
+
+    using TexStorageFunc = std::function<void(const Storage&)>;
+    using TexSubFunc = std::function<void(const Storage&, const Block&, const Item2&)>;
+
+private:
+    TexGroup(){}
+
+public:
+    ~TexGroup();
+
+public:
+    static ResourcePtr<TexGroup> create();
+
+public:
+    void create(const std::string& name, const Storage& storage, TexStorageFunc f);
+    void create1D(const std::string& name, const Storage& storage);
+    void create2D(const std::string& name, const Storage& storage);
+    void create3D(const std::string& name, const Storage& storage);
+
+    void write(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item, TexSubFunc f);
+    void write1D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item);
+    void write2D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item);
+    void write3D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item);
+    void writeCubeMap(const std::string& name, const std::vector<TexGroup::Block>& bks,
+        const TexGroup::Item2& item);
+
+    const auto& getStorage(const std::string& name) const { return storageMap.at(name); }
+    const auto& getStorageMap() const { return storageMap; }
+
+    auto getHandle(const std::string& name) const { return handleMap.at(name); }
+
+    auto has(const std::string& name) const { return handleMap.find(name) != handleMap.end(); }
+    void read(const std::string& name, size_t level, int pixelFormat, int dataType, void* data);
+    void clear();
+
+private:
+    std::map<std::string, GLuint> handleMap;
+    std::map<std::string, Storage> storageMap;
+};
+using TextureGroupPtr = ResourcePtr<TexGroup>;
+---
+
+--- texture implemention
+//----------------------------
+// texture implemention
+void TexGroup::create(const std::string& name, const TexGroup::Storage& st, TexStorageFunc f){
+    if (handleMap.find(name) != handleMap.end()){
+        DEL_OBJECT(glDeleteTextures, handleMap.at(name));
+    }
+
+    GLuint handle{0};
+    GEN_OBJECT(glGenTextures, handle);
+    glBindTexture(st.target, handle);
+    f(st);
+    glBindTexture(st.target, 0);
+
+    storageMap[name] = st;
+    handleMap[name] = handle;
+}
+
+void TexGroup::create1D(const std::string& name, const TexGroup::Storage& st){
+    create(name, st, [](const TexGroup::Storage& st){
+        glTexStorage1D(st.target, st.levels, st.texelFormat, st.width);
+    });
+}
+
+void TexGroup::create2D(const std::string& name, const TexGroup::Storage& st){
+    create(name, st, [](const TexGroup::Storage& st){
+        glTexStorage2D(st.target, st.levels, st.texelFormat, st.width, st.height);
+    });
+}
+
+void TexGroup::create3D(const std::string& name, const TexGroup::Storage& st){
+    create(name, st, [](const TexGroup::Storage& st){
+        glTexStorage3D(st.target, st.levels, st.texelFormat, st.width, st.height, st.depth);
+    });
+}
+
+void TexGroup::write(const std::string& name, const TexGroup::Block& bk,
+    const TexGroup::Item2& item, TexSubFunc f){
+
+    auto st = storageMap.at(name);
+    auto handle = handleMap.at(name);
+
+    mAssert(item.level < st.levels);
+
+    st.width = bk.width == 0 ? st.width >> item.level : bk.width;
+    st.height = bk.height == 0 ? st.height >> item.level : bk.height;
+    st.depth = bk.depth == 0 ? st.depth >> item.level : bk.depth;
+
+    auto ss = Snapshot::create();
+    ss->take(GL_UNPACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_UNPACK_ALIGNMENT, v[0]);});
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+    glBindTexture(st.target, handle);
+    f(st, bk, item);
+    if (st.sampler->hasMipmap()){
+        glGenerateMipmap(st.target);
+    }
+    glBindTexture(st.target, 0);
+
+    ss->restore();
+}
+
+void TexGroup::write1D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item){
+    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item2& item){
+        glTexSubImage1D(st.target, item.level, bk.xoffset,
+            st.width,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void TexGroup::write2D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item){
+    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item2& item){
+        glTexSubImage2D(st.target, item.level, bk.xoffset, bk.yoffset,
+            st.width, st.height,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void TexGroup::write3D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item){
+    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item2& item){
+        glTexSubImage3D(st.target, item.level, bk.xoffset, bk.yoffset, bk.zoffset,
+            st.width, st.height, st.depth,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void TexGroup::writeCubeMap(const std::string& name,
+    const std::vector<TexGroup::Block>& bks, const TexGroup::Item2& item){
+
+    for(int i = 0; i < 6; ++i){
+        write(name, bks[i], item, [=](const Storage& st, const TexGroup::Block& bk, const Item2& item){
+            glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, item.level, bk.xoffset, bk.yoffset,
+                st.width, st.height,
+                item.pixelFormat, item.dataType, bk.data);
+        });
+    }
+
+}
+
+TexGroup::~TexGroup(){
+    for(const auto& pr : handleMap){
+        DEL_OBJECT(glDeleteTextures, pr.second);
+    }
+}
+
+ResourcePtr<TexGroup> TexGroup::create(){
+    return ResourcePtr<TexGroup>(new TexGroup());
+}
+
+void TexGroup::read(const std::string& name, size_t level, int pixelFormat, int dataType, void* data){
+    const auto& st = getStorage(name);
+    auto handle = getHandle(name);
+
+    mAssert(level < st.levels);
+
+    auto ss = Snapshot::create();
+    ss->take(GL_PACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_PACK_ALIGNMENT, v[0]);});
+
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glBindTexture(st.target, handle);
+    glGetTexImage(st.target, level, pixelFormat, dataType, data);
+    glBindTexture(st.target, 0);
+
+    ss->restore();
+}
+
+void TexGroup::clear(){
+    for(const auto& pr : handleMap){
+        DEL_OBJECT(glDeleteTextures, pr.second);
+    }
+    handleMap.clear();
+    storageMap.clear();
+}
+---
+
+--- shader
+//---------------
+// shader
+class Shader{
+public:
+    Shader(int type, const char* strPtr, const char* endStr);
+    Shader(int type, const char* strPtr, size_t count);
+    Shader(int type, const char* filename);
+    Shader(const char* filename);
+
+public:
+    auto getType() const { return shaderType; }
+    const auto& getStrCode() const { return strCode; }
+    const auto& getFilename() const { return shaderFilename; }
+
+private:
+    int shaderType{0};
+    std::string strCode;
+    std::string shaderFilename;
+};
+---
+
+--- shader implemention
+//-------------------------
+// shader implemention
+Shader::Shader(int type, const char* strPtr, const char* endStr) : shaderType(type) {
+    if (endStr == nullptr || strcmp(endStr, "") == 0){
+        strCode = strPtr;
+    }else{
+        auto posPtr = strstr(strPtr, endStr);
+        strCode = std::string(strPtr, posPtr - strPtr);
+    }
+}
+
+Shader::Shader(int type, const char* strPtr, size_t count)
+    : strCode(strPtr, count), shaderType(type) {}
+
+Shader::Shader(int type, const char* filename) : shaderType(type), shaderFilename(filename) {
+    FILE* fp = fopen(filename, "rb");
+    if (fp == nullptr){
+        fprintf(stderr, "failed to open '%s' in file %s at line #%d\n", filename,
+            __FILE__, __LINE__);
+    }else{
+        fseek(fp, 0, SEEK_END);
+        auto endPos = ftell(fp);
+        strCode.resize(endPos + 1, 0);
+
+        rewind(fp);
+        fread(&strCode[0], sizeof(std::string::value_type), strCode.size(), fp);
+
+        fclose(fp);
+    }
+}
+
+Shader::Shader(const char* filename) : Shader(getShaderTypeBySuffix(filename), filename) {}
+---
+
+@include tow\shader_variable.lit
+
+--- program
+//=========================
+// program
+enum ProgramCheckFlags{
+    None                = 0,
+    Uniform             = 1<<0,
+    SubroutineUniform   = 1<<1,
+    Sampler             = 1<<2,
+    Block               = 1<<3,
+    All                 = Uniform | SubroutineUniform | Sampler | Block
+};
+
+class Program{
+    friend class ShaderVarTable;
+    friend class ProgramInputSender;
+    friend class ProgramOutputSender;
+    friend class BlockSender;
+    friend class GraphicPipeline;
+    friend class ComputePipeline;
+    friend class Framebuffer;
+    friend class DefaultFramebuffer;
+
+private:
+    Program(){}
+public:
+    ~Program();
+
+public:
+    static ProgramPtr create(const std::vector<Shader>& shaders, VertexLayoutPtr layout = nullptr);
+
+public:
+    //------------------
+    // query methods
+    auto isLinked() const { return linked; }
+
+    auto hasUniform(const char* name) const {
+        return shaderVarTable.getUniformMap().has(name);
+    }
+    auto hasSampler(const char* name) const {
+        return shaderVarTable.getSamplerMap().has(name);
+    }
+    auto hasSubroutine(int type, const char* name) const {
+        return shaderVarTable.getSubroutineUniformMap(type).has(name);
+    }
+    auto hasUniformBlock(const char* name) const {
+        return shaderVarTable.getUniformBlockMap().has(name);
+    }
+    auto hasStorageBlock(const char* name) const {
+        return shaderVarTable.getStorageBlockMap().has(name);
+    }
+
+    //-------------
+    // setter
+
+    // uniform
+    void setUniformf(const char* name, const UniformSender::Block& bk){
+        uniformSender.setf(name, bk);
+    }
+    void setUniformf(const char* name, float data){
+        uniformSender.setf(name, {&data});
+    }
+    void setUniformi(const char* name, const UniformSender::Block& bk){
+        uniformSender.seti(name, bk);
+    }
+    void setUniformi(const char* name, int data){
+        uniformSender.seti(name, {&data});
+    }
+    void setUniformui(const char* name, const UniformSender::Block& bk){
+        uniformSender.setui(name, bk);
+    }
+    void setUniformui(const char* name, unsigned int data) {
+        uniformSender.setui(name, {&data});
+    }
+
+    // sampler
+    void setSampler(TextureGroupPtr texture, const std::string& texName, const std::string& uniformName){
+        samplerSender.setSampler(uniformName, {texture, texName});
+    }
+    void setSampler(TextureGroupPtr texture, const std::string& texName) {
+        samplerSender.setSampler(texName, {texture, texName});
+    }
+
+    // block
+    void bindStorageBufferBlock(const std::string& name, BufferBindingPtr binding){
+        blockSender.bindStorageBufferBlock(name, binding);
+    }
+    void bindUniformBlock(const std::string& name, BufferBindingPtr binding){
+        blockSender.bindUniformBlock(name, binding);
+    }
+
+    // subroutine
+    void setSubroutine(int shaderType, const std::string& uniformName, const std::string& indexName){
+        subroutineSender.setSubroutine(shaderType, uniformName, indexName);
+    }
+
+    // program output
+    void setProgramOutputLocation(const std::string& name, int location){
+        assert(!isLinked());
+        progOutputSender.setLocation(name, location);
+    }
+
+    // shader tag
+    void setShaderTag(const std::string& tag) { shaderTag = tag; }
+
+    //------------------
+    // getter
+    const auto& getShaders() const { return progShaders; }
+    const auto& getShaderTag() const { return shaderTag; }
+    auto& getShaderVarTable() { return shaderVarTable; }
+
+    const auto& getVertexLayout() { return vertexLayout; }
+    auto& getSamplerSender() { return samplerSender; }
+
+    auto getProgramOutputLocation(const std::string& name) const {
+        return progOutputSender.getLocation(name);
+    }
+
+    //-------------------
+    // check methods
+    void check(ProgramCheckFlags flags) { checkFlags = flags; }
+    void check();
+
+private:
+    void send();
+    void add(const Shader& shader);
+    void link();
+    auto getHandle() const { return progHandle; }
+
+private:
+    // program
+    GLuint progHandle{0};
+    bool linked{false};
+    ProgramCheckFlags checkFlags{ProgramCheckFlags::None};
+
+    // shaders
+    std::string shaderTag;
+    std::vector<Shader> progShaders;
+    std::vector<GLuint> shaderHandles;
+    ShaderVarTable shaderVarTable;
+
+    // senders
+    SamplerSender samplerSender;
+    UniformSender uniformSender;
+    BlockSender blockSender;
+    SubroutineSender subroutineSender;
+    ProgramOutputSender progOutputSender;
+    ProgramInputSender progInputSender;
+
+    // layout
+    VertexLayoutPtr vertexLayout;
+};
+---
+
+--- program implemention
+//-------------------------
+// program implemention
+Program::~Program(){
+    for(auto handle : shaderHandles){
+        FREE_OBJECT(glDeleteShader, handle);
+    }
+    FREE_OBJECT(glDeleteProgram, progHandle);
+}
+
+ProgramPtr Program::create(const std::vector<Shader>& shaders, VertexLayoutPtr layout){
+    auto ptr = new Program();
+    ptr->vertexLayout = layout;
+
+    CREATE_OBJECT(glCreateProgram, ptr->progHandle);
+
+    ptr->shaderVarTable.setHandle(ptr->progHandle);
+
+    for(const auto& shader : shaders){
+        ptr->add(shader);
+    }
+
+    // set default shader tag
+    if (!shaders.empty()){
+        const auto& filename = shaders.at(0).getFilename();
+
+        auto startPos = filename.rfind("/");
+        if (startPos == std::string::npos){
+            startPos = filename.rfind("\\");
+        }
+        auto endPos = filename.rfind(".");
+
+        if (startPos != std::string::npos && endPos != std::string::npos){
+            ptr->shaderTag = filename.substr(startPos + 1, endPos - startPos - 1);
+        }
+    }
+
+    return ProgramPtr(ptr);
+}
+
+void Program::add(const Shader& shader){
+    mAssert(!linked);
+
+    // create shader
+    GLuint handle;
+    CREATE_OBJECT(glCreateShader, handle, shader.getType());
+    const char* const strCodePtr = shader.getStrCode().c_str();
+    GLint length = shader.getStrCode().length();
+    glShaderSource(handle, 1, &strCodePtr, &length);
+    shaderHandles.push_back(handle);
+
+    // compile shader
+    glCompileShader(handle);
+
+    // query compile status
+    GLint len;
+    glGetShaderiv(handle, GL_INFO_LOG_LENGTH, &len);
+    if (len > 1) {
+        std::string log(len, 0);
+        glGetShaderInfoLog(handle, len, nullptr, &log[0]);
+        fprintf(stderr, "'%s'\n%s\n", shader.getFilename().c_str(), log.c_str());
+        mAssert(false);
+    }
+    GLint status;
+    glGetShaderiv(handle, GL_COMPILE_STATUS, &status);
+
+    // attach shader
+    if (status == GL_TRUE){
+        glAttachShader(progHandle, handle);
+        progShaders.push_back(shader);
+    }
+}
+
+void Program::send(){
+    if (progShaders.empty()) return;
+
+    samplerSender.send(this);
+    uniformSender.send(this);
+    subroutineSender.send(this);
+    blockSender.send(this);
+}
+
+void Program::link(){
+    if (progShaders.empty()) return;
+
+    // set vertex attribute locations
+    progInputSender.send(this);
+
+    // set fragment output variable lcoations
+    progOutputSender.send(this);
+
+    // link
+    glLinkProgram(progHandle);
+    linked = true;
+
+    // query program status
+    GLint len;
+    glGetProgramiv(progHandle, GL_INFO_LOG_LENGTH, &len);
+    if (len > 1) {
+        std::string log(len, 0);
+        glGetProgramInfoLog(progHandle, len, nullptr, &log[0]);
+        fprintf(stderr, "shader log: %s\n", log.c_str());
+        mAssert(false);
+    }
+}
+
+void Program::check(){
+    if (progShaders.empty()) return;
+
+    if (checkFlags & ProgramCheckFlags::Uniform) uniformSender.check(this);
+    if (checkFlags & ProgramCheckFlags::SubroutineUniform) subroutineSender.check(this);
+    if (checkFlags & ProgramCheckFlags::Sampler) samplerSender.check(this);
+    if (checkFlags & ProgramCheckFlags::Block) blockSender.check(this);
+}
+---

@@ -1,0 +1,41 @@
+@comment_type // %s
+
+@s
+
+@include examples/imgui_ex/imgui_math.lit
+@include examples/imgui_ex/imgui_splitter.lit
+@include examples/imgui_ex/imgui_widget.lit
+
+--- imgui_ex.h
+#ifndef IMGUI_EX_H
+#define IMGUI_EX_H
+
+#include "imgui.h"
+
+#include <functional>
+
+namespace ImGui{
+@{imgui math}
+@{imgui splitter}
+@{imgui widget}
+}
+
+#endif
+---
+
+--- imgui_ex.cpp
+#include "imgui_ex.h"
+
+#include <cassert>
+#include <cstdio>
+
+#include <vector>
+#include <map>
+#include <algorithm>
+
+namespace ImGui{
+@{imgui splitter implemention}
+@{imgui widget implemention}
+}
+
+---

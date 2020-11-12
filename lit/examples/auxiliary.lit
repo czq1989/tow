@@ -1,0 +1,131 @@
+@comment_type // %s
+
+@s
+
+--- auxiliary.h
+#ifndef AUXILIARY_H
+#define AUXILIARY_H
+
+#include "tow.h"
+#include "glm.hpp"
+
+class Auxiliary;
+using AuxiliaryPtr = tow::ResourcePtr<Auxiliary>;
+
+class Auxiliary{
+private:
+    Auxiliary(){}
+
+public:
+    static AuxiliaryPtr create(size_t numPositions, size_t numIndices = 0,
+        const std::vector<tow::Shader>& shaders = {});
+
+public:
+    void fillPositions(const glm::vec3* posPtr);
+    void fillPositions(const std::vector<glm::vec3>& posVec) { fillPositions(posVec.data()); }
+
+    void fillIndices(const GLushort* indexPtr);
+    void fillIndices(const std::vector<GLushort>& indexVec) { fillIndices(indexVec.data()); }
+
+    void fillColors(const glm::u8vec3* colorPtr);
+    void fillColors(const std::vector<glm::u8vec3>& colorVec) { fillColors(colorVec.data()); }
+    void fillColors(const glm::u8vec3& color);
+
+    const auto& getPipeline() const { return pipeline; }
+
+public:
+    void draw(int topology, const glm::mat4& pvMat);
+
+private:
+    tow::GraphicPipelinePtr pipeline;
+    size_t numPositions{0};
+    size_t numIndices{0};
+};
+#endif
+---
+
+--- auxiliary.cpp
+#include "auxiliary.h"
+
+using namespace tow;
+using namespace glm;
+
+AuxiliaryPtr Auxiliary::create(size_t numPositions, size_t numIndices, const std::vector<Shader>& shaders){
+    assert(numPositions);
+    assert(numIndices);
+
+    auto ptr = new Auxiliary();
+    ptr->numPositions = numPositions;
+    ptr->numIndices = numIndices == 0 ? numPositions : numIndices;
+
+    auto layout = VertexLayout::create();
+    layout->add("a_position", {GL_FLOAT, 3, false, 0});
+    layout->add("a_color", {GL_UNSIGNED_BYTE, 3, true, sizeof(vec3) * numPositions});
+
+    auto bufGroup = BufferGroup::create();
+    bufGroup->createBuffer("b_vertex", nullptr,
+            {GL_ARRAY_BUFFER, sizeof(vec3) + sizeof(u8vec3), numPositions, GL_DYNAMIC_DRAW});
+
+    bufGroup->createBuffer("b_index", nullptr,
+            {GL_ELEMENT_ARRAY_BUFFER, sizeof(GLushort), numIndices, GL_DYNAMIC_DRAW});
+
+    if (shaders.empty()){
+        ptr->pipeline = GraphicPipeline::create({bufGroup, "b_vertex", "b_index"}, layout, {
+            "assets/shaders/auxiliary.vert",
+            "assets/shaders/auxiliary.frag",
+        });
+    }else{
+        ptr->pipeline = GraphicPipeline::create({bufGroup, "b_vertex", "b_index"}, layout, shaders);
+    }
+
+    // fill default colors and indices
+    ptr->fillColors({255, 0, 0});
+    std::vector<GLushort> indices(numIndices);
+    for(size_t i = 0; i < numIndices; ++i){
+        indices.at(i) = (GLushort)i;
+    }
+    ptr->fillIndices(indices);
+
+    return AuxiliaryPtr(ptr);
+}
+
+void Auxiliary::fillPositions(const glm::vec3* posPtr){
+    pipeline->getBufferGroup()->write("b_vertex", posPtr, 0, numPositions * sizeof(vec3));
+}
+
+void Auxiliary::fillColors(const glm::u8vec3* colorPtr){
+    pipeline->getBufferGroup()->write("b_vertex", colorPtr, numPositions * sizeof(vec3),
+        numPositions * sizeof(u8vec3));
+}
+
+void Auxiliary::fillColors(const glm::u8vec3& color){
+    std::vector<u8vec3> colors(numPositions, color);
+    fillColors(colors);
+}
+
+void Auxiliary::fillIndices(const GLushort* indexPtr){
+    pipeline->getBufferGroup()->write("b_index", indexPtr, 0, numIndices * sizeof(GLushort));
+}
+
+void Auxiliary::draw(int topology, const mat4& pvMat){
+    pipeline->getProgram()->setUniformf("u_pvmMat", {&pvMat, 16});
+    drawElements(pipeline, topology);
+}
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

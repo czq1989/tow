@@ -1,0 +1,113 @@
+
+--- draw functions
+//===================
+// draw functions
+
+//--------------
+// draw arrays
+extern void drawArrays(GraphicPipelinePtr pipe, int primitiveType, size_t startIndex, size_t vertexCount);
+
+inline void drawArrays(GraphicPipelinePtr pipe, int primitiveType, size_t startIndex){
+    drawArrays(pipe, primitiveType, startIndex, pipe->getVertexArray()->getVertexCount());
+}
+inline void drawArrays(GraphicPipelinePtr pipe, int primitiveType){
+    drawArrays(pipe, primitiveType, 0, pipe->getVertexArray()->getVertexCount());
+}
+
+//----------------
+// draw elements
+extern void drawElements(GraphicPipelinePtr pipe, int primitiveType, size_t startIndex, size_t indexCount);
+
+inline void drawElements(GraphicPipelinePtr pipe, int primitiveType, size_t startIndex){
+    drawElements(pipe, primitiveType, startIndex, pipe->getVertexArray()->getIndexCount());
+}
+inline void drawElements(GraphicPipelinePtr pipe, int primitiveType){
+    drawElements(pipe, primitiveType, 0, pipe->getVertexArray()->getIndexCount());
+}
+
+extern void drawElementsBaseVertex(GraphicPipelinePtr pipe, int primitiveType,
+    size_t startIndex, size_t indexCount, size_t baseVertex);
+
+//---------------------------
+// draw arrays instanced
+extern void drawArraysInstanced(GraphicPipelinePtr pipe, int primitiveType, size_t instanceCount,
+    size_t startIndex, size_t vertexCount);
+
+inline void drawArraysInstanced(GraphicPipelinePtr pipe, int primitiveType, size_t instanceCount,
+    size_t startIndex){
+
+    drawArraysInstanced(pipe, primitiveType, instanceCount, startIndex, pipe->getVertexArray()->getVertexCount());
+}
+
+inline void drawArraysInstanced(GraphicPipelinePtr pipe, int primitiveType, size_t instanceCount){
+    drawArraysInstanced(pipe, primitiveType, instanceCount, 0, pipe->getVertexArray()->getVertexCount());
+}
+
+//---------------------------
+// draw elements instanced
+extern void drawElementsInstanced(GraphicPipelinePtr pipe, int primitiveType, size_t instanceCount,
+    size_t startIndex, size_t indexCount);
+
+inline void drawElementsInstanced(GraphicPipelinePtr pipe, int primitiveType, size_t instanceCount,
+    size_t startIndex){
+
+    drawElementsInstanced(pipe, primitiveType, instanceCount, startIndex, pipe->getVertexArray()->getIndexCount());
+}
+
+inline void drawElementsInstanced(GraphicPipelinePtr pipe, int primitiveType, size_t instanceCount){
+    drawElementsInstanced(pipe, primitiveType, instanceCount, 0, pipe->getVertexArray()->getIndexCount());
+}
+
+---
+
+--- draw functions implemention
+//=============================
+// draw functions implemention
+
+void drawArrays(GraphicPipelinePtr pipe, int primitiveType, size_t startIndex, size_t vertexCount){
+    mAssert(startIndex + vertexCount <= pipe->getVertexArray()->getVertexCount());
+
+    pipe->setupDrawing();
+    glDrawArrays(primitiveType, startIndex, vertexCount);
+}
+
+void drawElements(GraphicPipelinePtr pipe, int primitiveType, size_t startIndex, size_t indexCount){
+    mAssert(startIndex + indexCount <= pipe->getVertexArray()->getIndexCount());
+    mAssert(pipe->getIndexType());
+
+    pipe->setupDrawing();
+    glDrawElements(primitiveType, indexCount, pipe->getIndexType(),
+        (const void*)(startIndex * pipe->getByteIndex()));
+}
+
+void drawElementsBaseVertex(GraphicPipelinePtr pipe, int primitiveType,
+    size_t startIndex, size_t indexCount, size_t baseVertex){
+
+    mAssert(startIndex + indexCount <= pipe->getVertexArray()->getIndexCount());
+    mAssert(pipe->getIndexType());
+
+    pipe->setupDrawing();
+    glDrawElementsBaseVertex(primitiveType, indexCount, pipe->getIndexType(),
+        (const void*)(startIndex * pipe->getByteIndex()), baseVertex);
+}
+
+void drawArraysInstanced(GraphicPipelinePtr pipe, int primitiveType, size_t instanceCount,
+    size_t startIndex, size_t vertexCount){
+
+    mAssert(startIndex + vertexCount <= pipe->getVertexArray()->getVertexCount());
+
+    pipe->setupDrawing();
+    glDrawArraysInstanced(primitiveType, startIndex, vertexCount, instanceCount);
+}
+
+void drawElementsInstanced(GraphicPipelinePtr pipe, int primitiveType, size_t instanceCount,
+    size_t startIndex, size_t indexCount){
+
+    mAssert(startIndex + indexCount <= pipe->getVertexArray()->getIndexCount());
+    mAssert(pipe->getIndexType());
+
+    pipe->setupDrawing();
+    glDrawElementsInstanced(primitiveType, indexCount, pipe->getIndexType(),
+        (const void*)(startIndex * pipe->getByteIndex()), instanceCount);
+}
+---

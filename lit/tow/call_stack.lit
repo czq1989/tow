@@ -1,0 +1,137 @@
+@comment_type // %s
+
+@s
+
+--- call_stack.h
+#ifndef CALL_STACK_H
+#define CALL_STACK_H
+
+#include "tow.h"
+
+struct _SYMBOL_INFO;
+struct _IMAGEHLP_LINE;
+
+class CallStack;
+using CallStackPtr = tow::ResourcePtr<CallStack>;
+
+class CallStack{
+public:
+    static const CallStackPtr& get();
+
+    CallStack();
+    ~CallStack();
+
+    void printStack(int frameSkipped = 3, int frameIngored = 7);
+
+private:
+  _SYMBOL_INFO* symbolInfo{nullptr};
+  _IMAGEHLP_LINE* imageHelpLine{nullptr};
+
+};
+
+#endif
+---
+
+--- call_stack.cpp
+#include "call_stack.h"
+
+const CallStackPtr& CallStack::get(){
+    static auto cs = CallStackPtr(new CallStack());
+    return cs;
+}
+
+CallStack::CallStack(){}
+CallStack::~CallStack(){}
+void CallStack::printStack(int frameSkipped, int frameIngored){}
+
+---
+
+--- call_stack_win32.cpp
+#include "call_stack.h"
+
+#ifdef _WIN32
+    #undef APIENTRY
+    #include <windows.h>
+    #include <dbghelp.h>
+    #undef APIENTRY
+    #define APIENTRY __stdcall
+#endif
+
+#include <cstdio>
+#include <string>
+
+static const unsigned long MAX_NAME_LEN = 255;
+static const unsigned long MAX_FRAMES = 63;
+
+const CallStackPtr& CallStack::get(){
+    static auto cs = CallStackPtr(new CallStack());
+    return cs;
+}
+
+CallStack::CallStack(){
+    SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES);
+    if (FALSE == SymInitialize(GetCurrentProcess(), NULL, TRUE)) {
+        fprintf(stderr, "failed to initialize sym, error code: %d\n", GetLastError());
+    }
+
+    symbolInfo = (PSYMBOL_INFO)malloc(sizeof(SYMBOL_INFO) + (MAX_NAME_LEN + 1) * sizeof(CHAR));
+    symbolInfo->MaxNameLen = MAX_NAME_LEN;
+    symbolInfo->SizeOfStruct = sizeof(SYMBOL_INFO);
+
+    imageHelpLine = (IMAGEHLP_LINE*)malloc(sizeof(IMAGEHLP_LINE));
+    imageHelpLine->SizeOfStruct = sizeof(IMAGEHLP_LINE);
+}
+
+CallStack::~CallStack(){
+    free(symbolInfo);
+    free(imageHelpLine);
+    SymCleanup(GetCurrentProcess());
+}
+
+static void getShortFilePath(std::string& str, const std::string& path){
+    auto pos = std::string::npos;
+    for (int i = 0; i < 3; ++i){
+        pos = path.rfind('\\', pos);
+        if (pos != std::string::npos){
+            pos -= 1;
+        }else{
+            break;
+        }
+    }
+    if (pos != std::string::npos){
+        str = path.substr(pos + 1);
+    }else{
+        str = path;
+    }
+}
+
+void CallStack::printStack(int frameSkipped, int frameIngored){
+    PVOID frameAddrs[MAX_FRAMES];
+    const ULONG captureFrame = MAX_FRAMES - frameSkipped;
+
+    auto captureNum = CaptureStackBackTrace(frameSkipped, captureFrame, frameAddrs, NULL);
+    if (captureNum > frameIngored) {
+        captureNum -= (WORD)frameIngored;
+    }
+
+    fprintf(stderr, "call stack:\n");
+
+    auto handle = GetCurrentProcess();
+    std::string str;
+    for (decltype(captureNum) i = 0; i < captureNum; ++i) {
+        if (FALSE == SymFromAddr(handle, (DWORD64)frameAddrs[i], 0, symbolInfo)) {
+            fprintf(stderr, "failed to get symbol info from addr, frame index: %d\n", captureNum - i - 1);
+            break;
+        }
+        DWORD displacement;
+        if (FALSE == SymGetLineFromAddr(handle, (DWORD)frameAddrs[i], &displacement, imageHelpLine)){
+            fprintf(stderr, "failed to get line info from addr, frame index: %d\n", captureNum - i - 1);
+            break;
+        }
+
+        getShortFilePath(str, imageHelpLine->FileName);
+        fprintf(stderr, "%i: %s:%d: '%s'\n", captureNum - i - 1, str.c_str(), imageHelpLine->LineNumber,
+            symbolInfo->Name);
+    }
+}
+---

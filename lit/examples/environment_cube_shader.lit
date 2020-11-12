@@ -1,0 +1,35 @@
+@comment_type // %s
+
+@s
+
+--- environment_cube.vert
+#version 430 core
+
+in vec3 a_position;
+
+uniform mat4 u_modelMat;
+uniform mat4 u_pvmMat;
+
+out vec3 v_position;
+
+void main(){
+    vec4 clippedPos = u_pvmMat * vec4(a_position, 1);
+    gl_Position = clippedPos.xyww;
+
+    v_position = vec3(u_modelMat * vec4(a_position, 1));
+}
+---
+
+--- environment_cube.frag
+#version 430 core
+
+in vec3 v_position;
+
+uniform samplerCube s_cube;
+
+out vec4 f_color;
+
+void main(){
+    f_color = texture(s_cube, v_position);
+}
+---

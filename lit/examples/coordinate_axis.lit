@@ -1,0 +1,106 @@
+@comment_type // %s
+
+@s
+
+--- coordinate_axis.h
+#ifndef COORDINATE_AXIS_H
+#define COORDINATE_AXIS_H
+
+#include "tow.h"
+#include "glm.hpp"
+
+class CoordinateAxis;
+using CoordinateAxisPtr = tow::ResourcePtr<CoordinateAxis>;
+
+class CoordinateAxis{
+private:
+    CoordinateAxis(){}
+
+public:
+    static CoordinateAxisPtr create();
+
+public:
+    void draw(const glm::mat4& pvMat);
+
+private:
+    tow::GraphicPipelinePtr pipeline;
+};
+#endif
+---
+
+--- coordinate_axis.cpp
+#include "coordinate_axis.h"
+
+using namespace tow;
+using namespace glm;
+
+CoordinateAxisPtr CoordinateAxis::create(){
+    auto ptr = new CoordinateAxis();
+
+    // specify vertex layout
+    struct Vertex{
+        vec3 position;
+        u8vec3 color;
+    };
+
+    auto layout = VertexLayout::create();
+    layout->add("a_position", {GL_FLOAT, 3, false, 0});
+    layout->add("a_color", {GL_UNSIGNED_BYTE, 3, true, offsetof(Vertex, color)});
+    layout->stride(sizeof(Vertex));
+
+    // load vertices and indices
+    const float kExtent = 10000.0f;
+    Vertex vertices[] = {
+        {vec3(+kExtent, 0, 0), u8vec3(255, 0, 0)},
+        {vec3(-kExtent, 0, 0), u8vec3(255, 0, 0)},
+        {vec3(0, 0, +kExtent), u8vec3(0, 0, 255)},
+        {vec3(0, 0, -kExtent), u8vec3(0, 0, 255)},
+    };
+
+    GLubyte indices[] = {
+        0, 1,
+        2, 3,
+    };
+
+    auto bufGroup = BufferGroup::create();
+
+    bufGroup->createBuffer("b_vertex", vertices,
+            {GL_ARRAY_BUFFER, sizeof(Vertex), sizeof(vertices) / sizeof(Vertex), GL_STATIC_DRAW});
+
+    bufGroup->createBuffer("b_index", indices,
+            {GL_ELEMENT_ARRAY_BUFFER, sizeof(GLubyte), sizeof(indices) / sizeof(GLubyte), GL_STATIC_DRAW});
+
+    // create graphic pipeline
+    auto vertexArray = VertexArray::create({bufGroup, "b_vertex", "b_index"}, layout);
+    auto program = Program::create({
+        "assets/shaders/coordinate_axis.vert",
+        "assets/shaders/coordinate_axis.frag",
+    }, layout);
+
+    ptr->pipeline = GraphicPipeline::create(vertexArray, program);
+
+    return CoordinateAxisPtr(ptr);
+}
+
+void CoordinateAxis::draw(const mat4& pvMat){
+    pipeline->getProgram()->setUniformf("u_pvmMat", {&pvMat, 16});
+    drawElements(pipeline, GL_LINES);
+}
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

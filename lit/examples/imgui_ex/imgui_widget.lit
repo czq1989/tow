@@ -1,0 +1,76 @@
+
+--- imgui widget
+//----------------
+// imgui widget
+void SetLabelWidth(float width);
+void SetWidgetWidth(float width);
+
+float GetLabelWidth();
+float GetWidgetWidth();
+
+void WidgetWithLeftLabel(const char* label, std::function<void()> widgetFunc);
+
+bool ButtonWithPivot(const char* name, const ImVec2& localPos, const ImVec2& pivot = ImVec2(0,0));
+void TextWithPivot(const char* text, const ImVec2& localPos, const ImVec2& pivot = ImVec2(0,0));
+
+ImVec2 GetFramedItemSize(const char* label);
+
+#define WIDGET_LEFT(label, func) ImGui::WidgetWithLeftLabel(label, __LINE__, func)
+
+---
+
+--- imgui widget implemention
+//-----------------------------------
+// imgui widget implemention
+
+static float s_labelWidth = 0;
+static float s_widgetWidth = 0;
+
+void SetLabelWidth(float width){
+    s_labelWidth = width;
+}
+
+void SetWidgetWidth(float width){
+    s_widgetWidth = width;
+}
+
+float GetLabelWidth(){
+    return s_labelWidth;
+}
+
+float GetWidgetWidth(){
+    return s_widgetWidth;
+}
+
+void WidgetWithLeftLabel(const char* label, std::function<void()> widgetFunc){
+    AlignTextToFramePadding();
+    Text(label);
+    SameLine(s_labelWidth);
+    PushID(std::hash<std::string>()(std::string(label)));
+    PushItemWidth(s_widgetWidth);
+    widgetFunc();
+    PopItemWidth();
+    PopID();
+}
+
+
+bool ButtonWithPivot(const char* name, const ImVec2& localPos, const ImVec2& pivot){
+    auto sz = CalcTextSize(name);
+    auto itemSize = GetStyle().FramePadding * 2.0f + sz;
+    SetCursorPos(localPos - itemSize * pivot);
+
+    return Button(name);
+}
+
+void TextWithPivot(const char* text, const ImVec2& localPos, const ImVec2& pivot){
+    auto sz = CalcTextSize(text);
+    SetCursorPos(localPos - sz * pivot);
+    Text(text);
+}
+
+ImVec2 GetFramedItemSize(const char* label){
+    auto sz = CalcTextSize(label);
+    return GetStyle().FramePadding * 2.0f + sz;
+}
+
+---
