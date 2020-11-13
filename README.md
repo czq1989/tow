@@ -1,6 +1,6 @@
 # TOW
 
-TOW is a tiny OpenGL wrapper written in [Literate](https://github.com/zyedidia/Literate). The Literate code of TOW is not much different from C++, you can read them without any knowledge about Literate. TOW only encapsulates the primary functions of OpenGL but provides more convenient methods with safety and less overhead.🚀
+TOW is a tiny OpenGL wrapper written in [Literate](https://github.com/zyedidia/Literate). The Literate code of TOW is not much different from C++, you can read them without any knowledge about Literate. TOW only encapsulates the primary functions of OpenGL but provides more convenient methods with safety and less overhead🚀.
 
 To draw things on the screen, usually, you only need these two objects:  `Framebuffer` and  `Graphicpipeline`,  see the code below for detail.
 
@@ -32,7 +32,7 @@ void render(float x, float y, float w, float h){
 }
 ```
 
-## How to compile
+## How to build
 
 On Windows, make sure you have installed vs2017 or later before running premake5.bat.
 
