@@ -53,7 +53,7 @@ A viewer that can load [gltf/glb](https://github.com/KhronosGroup/glTF/blob/mast
 
 ### Shader Toy
 
-A simple [shader toy](https://www.shadertoy.com/) simulator that you can write glsl code to implement cool graphic effects.
+A simple [shader toy](https://www.shadertoy.com/) emulator that you can write glsl code to implement cool graphic effects.
 
 ![shader_toy](https://user-images.githubusercontent.com/34378986/99018475-21104000-2595-11eb-8091-77cfe782f2ff.gif)
 
