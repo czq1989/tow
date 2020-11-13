@@ -36,7 +36,7 @@ void render(float x, float y, float w, float h){
 
 On Windows, make sure you have installed vs2017 or later before running premake5.bat.
 
-On other platforms, you should download your platform corresponding [premake5](https://premake.github.io/download.html) and [make](https://www.gnu.org/software/make/), and type in:
+On other platforms, you should download your platform corresponding [premake5](https://premake.github.io/download.html), [make](https://www.gnu.org/software/make/) and [Literate](https://github.com/zyedidia/Literate), then type in:
 
 ```C++
 make -C lit all
@@ -55,7 +55,7 @@ A viewer that can load [gltf/glb](https://github.com/KhronosGroup/glTF/blob/mast
 
 A simple [shader toy](https://www.shadertoy.com/) simulator that you can write glsl code to implement cool graphic effects.
 
-![shader_toy](https://user-images.githubusercontent.com/34378986/99016186-84986e80-2591-11eb-971b-3a3acca67880.gif)
+![shader_toy](https://user-images.githubusercontent.com/34378986/99018475-21104000-2595-11eb-8091-77cfe782f2ff.gif)
 
 ### UI Editor
 
