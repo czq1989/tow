@@ -483,7 +483,7 @@ public:
 private:
     void send();
     void add(const Shader& shader);
-    void link();
+    bool link();
     auto getHandle() const { return progHandle; }
 
 private:
@@ -554,6 +554,8 @@ ProgramPtr Program::create(const std::vector<Shader>& shaders, VertexLayoutPtr l
 void Program::add(const Shader& shader){
     mAssert(!linked);
 
+    progShaders.push_back(shader);
+
     // create shader
     GLuint handle;
     CREATE_OBJECT(glCreateShader, handle, shader.getType());
@@ -572,7 +574,6 @@ void Program::add(const Shader& shader){
         std::string log(len, 0);
         glGetShaderInfoLog(handle, len, nullptr, &log[0]);
         fprintf(stderr, "'%s'\n%s\n", shader.getFilename().c_str(), log.c_str());
-        mAssert(false);
     }
     GLint status;
     glGetShaderiv(handle, GL_COMPILE_STATUS, &status);
@@ -580,12 +581,11 @@ void Program::add(const Shader& shader){
     // attach shader
     if (status == GL_TRUE){
         glAttachShader(progHandle, handle);
-        progShaders.push_back(shader);
     }
 }
 
 void Program::send(){
-    if (progShaders.empty()) return;
+    mAssert(linked);
 
     samplerSender.send(this);
     uniformSender.send(this);
@@ -593,8 +593,8 @@ void Program::send(){
     blockSender.send(this);
 }
 
-void Program::link(){
-    if (progShaders.empty()) return;
+bool Program::link(){
+    if (linked) { return false; }
 
     // set vertex attribute locations
     progInputSender.send(this);
@@ -613,13 +613,13 @@ void Program::link(){
         std::string log(len, 0);
         glGetProgramInfoLog(progHandle, len, nullptr, &log[0]);
         fprintf(stderr, "shader log: %s\n", log.c_str());
-        mAssert(false);
+        return false;
     }
+
+    return true;
 }
 
 void Program::check(){
-    if (progShaders.empty()) return;
-
     if (checkFlags & ProgramCheckFlags::Uniform) uniformSender.check(this);
     if (checkFlags & ProgramCheckFlags::SubroutineUniform) subroutineSender.check(this);
     if (checkFlags & ProgramCheckFlags::Sampler) samplerSender.check(this);
