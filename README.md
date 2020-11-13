@@ -49,16 +49,16 @@ premak5 your_action
 
 A viewer that can load [gltf/glb](https://github.com/KhronosGroup/glTF/blob/master/README.md) file, and supports PBR, skin, morph target, and animation. Most files I have tested are from [sketchfab](https://sketchfab.com/3d-models?features=downloadable&sort_by=-likeCount) and [GeneratedAssets](https://github.com/KhronosGroup/glTF-Asset-Generator), however, in order to keep this repository size small, I don't put all of them into the assets folder.
 
-![gltf model viewer](https://user-images.githubusercontent.com/34378986/98965647-3f4e4f80-2545-11eb-81d4-8be2efd8a5d4.gif)
+![gltf_model_viewer](https://user-images.githubusercontent.com/34378986/99016175-7ba79d00-2591-11eb-9ebe-6b07d8c0dee4.gif)
 
 ### Shader Toy
 
 A simple [shader toy](https://www.shadertoy.com/) simulator that you can write glsl code to implement cool graphic effects.
 
-![shader toy](https://user-images.githubusercontent.com/34378986/98965721-568d3d00-2545-11eb-9877-02b41a062b71.gif)
+![shader_toy](https://user-images.githubusercontent.com/34378986/99016186-84986e80-2591-11eb-971b-3a3acca67880.gif)
 
 ### UI Editor
 
 An editor that is used to edit game UI elements. If you have a [PSD](https://en.wikipedia.org/wiki/Adobe_Photoshop#File_format) file that all UI elements have already been arranged, drop it into the editor, then you can make some changes again or save it as a JSON file.
 
-![ui editor](https://user-images.githubusercontent.com/34378986/98966995-e54e8980-2546-11eb-9f6c-8eafe1834642.gif)
+![ui_editor](https://user-images.githubusercontent.com/34378986/99016271-b4e00d00-2591-11eb-955c-4f37120d06e9.gif)
