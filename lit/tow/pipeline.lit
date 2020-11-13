@@ -224,10 +224,9 @@ private:
 
 public:
     static GraphicPipelinePtr create(VertexArrayPtr va, ProgramPtr prog);
-
+    static GraphicPipelinePtr create(const VertexArray::Buffer& buf, VertexLayoutPtr layout);
     static GraphicPipelinePtr create(const VertexArray::Buffer& buf, VertexLayoutPtr layout,
         const std::vector<Shader>& shaders);
-
 public:
     // getter
     const auto& getVertexArray() const { return vertexArray; }
@@ -270,9 +269,15 @@ GraphicPipelinePtr GraphicPipeline::create(const VertexArray::Buffer& buf, Verte
     return create(VertexArray::create(buf, layout), Program::create(shaders, layout));
 }
 
+GraphicPipelinePtr GraphicPipeline::create(const VertexArray::Buffer& buf, VertexLayoutPtr layout){
+    std::vector<Shader> shaders = {
+        "assets/shaders/pipeline_shader.vert",
+        "assets/shaders/pipeline_shader.frag",
+    };
+    return create(VertexArray::create(buf, layout), Program::create(shaders, layout));
+}
 void GraphicPipeline::setupDrawing(){
-    if (!program->isLinked()){
-        program->link();
+    if (program->link()){
         program->getShaderVarTable().build();
         program->check();
     }
