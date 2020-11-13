@@ -277,12 +277,10 @@ public:
         v.clear();
     }
 
-
 private:
     std::vector<T> v;
     size_t count{0};
 };
-
 ---
 
 --- snapshot
