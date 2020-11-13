@@ -11,6 +11,7 @@
 
 #include <cassert>
 #include <map>
+#include <unordered_map>
 #include <unordered_set>
 #include <functional>
 
@@ -242,6 +243,7 @@ public:
     auto nonempty() const { return count > 0; }
     auto size() const { return count; }
     auto data() { return v.data(); }
+    const auto& getVector() const { return v; }
 
     T& at(size_t i) { assert(i < count); return v.at(i); }
     const T& at(size_t i) const { assert(i < count); return v.at(i); }
@@ -269,6 +271,12 @@ public:
         }
         return v.at(count++);
     }
+
+    void free(){
+        clear();
+        v.clear();
+    }
+
 
 private:
     std::vector<T> v;

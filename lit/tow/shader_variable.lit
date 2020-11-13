@@ -592,7 +592,7 @@ void UniformSender::send(Program* prog){
     const auto& svTable = prog->getShaderVarTable();
     const auto& uniformMap = svTable.getUniformMap();
 
-    for(const auto& pr : values){
+    for(const auto& pr : values.getVector()){
         const auto& name = pr.first;
         const auto& value = pr.second;
 
@@ -750,12 +750,14 @@ class SamplerSender{
 
 public:
     void setSampler(const std::string& uniformName, const Texture& texture);
+    void erase(const std::string& name) { textureMap.erase(name); }
+    void clear() { textureMap.clear(); }
 
     void send(Program* prog);
     void check(Program* prog);
 
 private:
-    DynamicArray<std::pair<std::string, Texture>> textures;
+    std::unordered_map<std::string, Texture> textureMap;
     std::map<std::string, int> unitMap;
 };
 ---
@@ -764,7 +766,7 @@ private:
 //----------------------------------
 // sampler sender implemention
 void SamplerSender::setSampler(const std::string& uniformName, const SamplerSender::Texture& texture){
-    textures.push_back({uniformName, texture});
+    textureMap[uniformName] = texture;
 }
 
 void SamplerSender::send(Program* prog){
@@ -782,7 +784,7 @@ void SamplerSender::send(Program* prog){
             unitMap.insert({pr.first, unit++});
         }
     }
-    for(const auto& pr : textures){
+    for(const auto& pr : textureMap){
         auto unit = unitMap.at(pr.first);
         const auto& texName = pr.second.texName;
         auto texGroup = pr.second.texGroup;
@@ -796,8 +798,6 @@ void SamplerSender::send(Program* prog){
         glBindSampler(unit, st.sampler->getHandle());
         glBindTexture(st.target, texGroup->getHandle(texName));
     }
-
-    textures.clear();
 }
 
 void SamplerSender::check(Program* prog){
@@ -807,11 +807,7 @@ void SamplerSender::check(Program* prog){
 
     std::vector<std::string> names;
     for(const auto& pr : svTable.getSamplerMap().getMap()){
-        auto it = std::find_if(textures.begin(), textures.end(),
-            [=](const std::pair<std::string, Texture>& texPr)->auto{
-                return texPr.first == pr.first;
-            });
-        if (it == textures.end()){
+        if (textureMap.find(pr.first) == textureMap.end()){
             names.push_back(pr.first);
         }
     }

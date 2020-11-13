@@ -231,6 +231,8 @@ void GltfModelViewer::setup(){
 
     // set common uniforms
     for(const auto& prog : tfModel->getPrograms()){
+        prog->setSampler(envIrradianceCube->getTexGroup(), "s_cube", "s_irradiance");
+        prog->setSampler(matcapTexGroup, "s_matcap");
         prog->bindUniformBlock("DirectionalLighting", dirLighting->getBufferBinding());
         prog->setUniformf("u_gamma", panelParam.gamma);
     }
@@ -308,8 +310,6 @@ void GltfModelViewer::render(Solution::Pane& pane, bool isMainView){
     auto viewMat = defaultCam->getViewMat();
     auto& eye = defaultCam->getView().eye;
     for(const auto& prog : tfModel->getPrograms()){
-        prog->setSampler(envIrradianceCube->getTexGroup(), "s_cube", "s_irradiance");
-        prog->setSampler(matcapTexGroup, "s_matcap");
         prog->setUniformf("u_eyePos", {&eye, 3});
         prog->setUniformf("u_pvMat", {&pvMat, 16});
         prog->setUniformf("u_viewMat", {&viewMat, 16});
