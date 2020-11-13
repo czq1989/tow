@@ -59,6 +59,6 @@ A simple [shader toy](https://www.shadertoy.com/) simulator that you can write g
 
 ### UI Editor
 
-An editor that is used to edit game UI elements. If you have a [PSD](https://en.wikipedia.org/wiki/Adobe_Photoshop#File_format) file that all UI elements have already been arranged, drop it into the editor, then you can make some changes again or save as a JSON file.
+An editor that is used to edit game UI elements. If you have a [PSD](https://en.wikipedia.org/wiki/Adobe_Photoshop#File_format) file that all UI elements have already been arranged, drop it into the editor, then you can make some changes again or save it as a JSON file.
 
 ![ui editor](https://user-images.githubusercontent.com/34378986/98966995-e54e8980-2546-11eb-9f6c-8eafe1834642.gif)
