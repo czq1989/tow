@@ -72,13 +72,15 @@ using namespace ImGui;
 
 ShaderToy::ShaderToy(const std::string& name) : Project(name){
     projLayout.setColumns({
-        {"Column1", 0.16f, {{"List View", 1.0f}}},
-        {"Column2", 0.84f, {{"Main View", 1.0f}}},
+        {"Column1", 0.15f, {{"List View", 1.0f}}},
+        {"Column2", 0.7f, {{"Main View", 1.0f}}},
+        {"Column3", 0.15f, {{"Channel View", 1.0f}}},
     });
 
     projLayout.setFunc([](Solution::Layout& layout, const ImVec2& initSize, const ImVec2& winSize){
         layout.getColumn(0).width = initSize.x * layout.getColumn(0).ratio;
-        layout.getColumn(1).width = winSize.x - layout.getColumn(0).width;
+        layout.getColumn(2).width = initSize.x * layout.getColumn(2).ratio;
+        layout.getColumn(1).width = winSize.x - layout.getColumn(0).width - layout.getColumn(2).width;
     });
 
     shaderMap = {
@@ -357,6 +359,8 @@ void ShaderToy::show(size_t cIndex, size_t pIndex){
         showListView(projLayout.getPane(0, 0));
     }else if (cIndex == 1){
         showMainView(projLayout.getPane(1, 0));
+    }else if (cIndex == 2){
+        showChannelView(projLayout.getPane(2, 0));
     }
 }
 
