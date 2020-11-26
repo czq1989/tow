@@ -151,12 +151,12 @@ void SH_Irradiance::generate(const std::string& srcCube, const std::string& dstC
 
     if (isHdr){
         for(int i = 0; i < 6; ++i){
-            ImageAsset()->writeImage(dstCube + ImageCache::cubeMapFaceNames[i] + ".hdr",
+            ImageAsset()->writeImage(dstCube + ImageAsset()->cubeMapFaceNames[i] + ".hdr",
                 image.width, image.height, 4, image.pixelPtrs[i]);
         }
     }else{
         for(int i = 0; i < 6; ++i){
-            ImageAsset()->writeImage(dstCube + ImageCache::cubeMapFaceNames[i] + ".png",
+            ImageAsset()->writeImage(dstCube + ImageAsset()->cubeMapFaceNames[i] + ".png",
                 image.width, image.height, 4, image.pixelPtrs[i]);
         }
     }
