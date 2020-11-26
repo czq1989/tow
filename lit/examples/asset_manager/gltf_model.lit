@@ -226,6 +226,7 @@ public:
 
 public:
     void send(tow::ProgramPtr program);
+    const auto& getTexGroup() const { return texGroup; }
 
 public:
     tow::TextureGroupPtr texGroup;
@@ -309,6 +310,8 @@ static void createGltfTexture(tinygltf::Model* model, int texInfoIndex,
     TextureGroupPtr texGroup, const char* texName){
 
     auto sp = SamplerParam::create();
+    sp->set(GL_TEXTURE_WRAP_S, GL_REPEAT);
+    sp->set(GL_TEXTURE_WRAP_T, GL_REPEAT);
 
     const auto& tex = model->textures.at(texInfoIndex);
     if (tex.sampler >= 0){
