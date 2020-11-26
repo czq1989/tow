@@ -18,7 +18,6 @@
 namespace tow{
 @{debug}
 @{resource pointer}
-@{array}
 @{snapshot}
 @{vertex specification}
 @{programable stages}
@@ -42,7 +41,7 @@ namespace tow{
 namespace tow{
 //---------------------
 // config
-//#define USE_TOW_ASSERT
+#define USE_TOW_ASSERT
 
 //-----------------------
 // assert
@@ -231,55 +230,6 @@ public:
 private:
     T* objectPtr{nullptr};
     size_t* refCount{nullptr};
-};
----
-
---- array
-//---------------------------
-// a simple vector wrapper
-template<typename T>
-class DynamicArray{
-public:
-    auto nonempty() const { return count > 0; }
-    auto size() const { return count; }
-    auto data() { return v.data(); }
-    const auto& getVector() const { return v; }
-
-    T& at(size_t i) { assert(i < count); return v.at(i); }
-    const T& at(size_t i) const { assert(i < count); return v.at(i); }
-    auto begin() { return v.begin(); }
-    auto end() { return v.begin() + count; }
-
-    T& back() { assert(count); return v.at(count - 1); }
-    const T& back() const { assert(count); return v.at(count - 1); }
-
-    void clear() { count = 0; }
-    void shrink_to_fit() { v.shrink_to_fit(); }
-
-    void push_back(const T& e){
-        if (count < v.size()){
-            v[count] = e;
-        }else{
-            v.push_back(e);
-        }
-        ++count;
-    }
-
-    T& raw_back(){
-        if (count >= v.size()){
-            v.push_back({});
-        }
-        return v.at(count++);
-    }
-
-    void free(){
-        clear();
-        v.clear();
-    }
-
-private:
-    std::vector<T> v;
-    size_t count{0};
 };
 ---
 

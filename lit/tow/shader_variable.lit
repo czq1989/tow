@@ -482,7 +482,7 @@ public:
     void setui(const std::string& name, const UniformSender::Block& bk);
 
 public:
-    DynamicArray<std::pair<std::string, Value>> values;
+    std::unordered_map<std::string, Value> valueMap;
 };
 ---
 
@@ -493,9 +493,7 @@ public:
 //-------------------
 // set uniforms
 #define SET_VAR(varName, type, byteType) do{\
-    auto& pr = values.raw_back();\
-    pr.first = name;\
-    auto& value = pr.second;\
+    auto& value = valueMap[name];\
     value.dataType = type;\
     value.componentCount = bk.componentCount;\
     value.arrayLen = bk.arrayLen;\
@@ -592,7 +590,7 @@ void UniformSender::send(Program* prog){
     const auto& svTable = prog->getShaderVarTable();
     const auto& uniformMap = svTable.getUniformMap();
 
-    for(const auto& pr : values.getVector()){
+    for(const auto& pr : valueMap){
         const auto& name = pr.first;
         const auto& value = pr.second;
 
@@ -615,8 +613,6 @@ void UniformSender::send(Program* prog){
                 mAssert(false);
         }
     };
-
-    values.clear();
 }
 
 void UniformSender::check(Program* prog){
@@ -626,12 +622,7 @@ void UniformSender::check(Program* prog){
     std::vector<std::string> names;
 
     for(const auto& pr : svTable.getUniformMap().getMap()){
-        auto it = std::find_if(values.begin(), values.end(),
-            [=](const std::pair<std::string, Value>& valPr)->auto{
-                return valPr.first == pr.first;
-            });
-
-        if (it == values.end()){
+        if (valueMap.find(pr.first) == valueMap.end()){
             names.push_back(pr.first);
         }
     }
