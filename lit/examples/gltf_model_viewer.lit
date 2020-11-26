@@ -130,6 +130,8 @@ GltfModelViewer::GltfModelViewer(const std::string& projName) : Project(projName
     modelFilenames = {
         "assets/models/sphere/scene.gltf",
         "assets/models/animal_ninja/scene.gltf",
+        "assets/models/kgirls01/scene.gltf",
+        "assets/models/low-poly_truck_car_drifter/scene.gltf",
     };
 
     defaultModelCount = modelFilenames.size();
