@@ -12,7 +12,9 @@ shared_lit := examples/auxiliary.lit\
               examples/main.lit\
               examples/solution.lit\
               examples/imgui_ex/imgui_ex.lit\
-              examples/skeleton_group.lit
+              examples/skeleton_group.lit\
+              examples/sh_irradiance.lit\
+
 
 $(shared_src)/dummy.target : $(shared_lit)
 	../tools/lit -t $? dummy.lit -odir $(shared_src)
