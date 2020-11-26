@@ -98,7 +98,7 @@ class TexGroup{
     friend class SamplerSender;
 
 public:
-    struct Item2{
+    struct Item{
         int pixelFormat{0};
         size_t level{0};
         int dataType{GL_UNSIGNED_BYTE};
@@ -123,7 +123,7 @@ public:
     };
 
     using TexStorageFunc = std::function<void(const Storage&)>;
-    using TexSubFunc = std::function<void(const Storage&, const Block&, const Item2&)>;
+    using TexSubFunc = std::function<void(const Storage&, const Block&, const Item&)>;
 
 private:
     TexGroup(){}
@@ -140,12 +140,12 @@ public:
     void create2D(const std::string& name, const Storage& storage);
     void create3D(const std::string& name, const Storage& storage);
 
-    void write(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item, TexSubFunc f);
-    void write1D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item);
-    void write2D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item);
-    void write3D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item);
+    void write(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item, TexSubFunc f);
+    void write1D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item);
+    void write2D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item);
+    void write3D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item);
     void writeCubeMap(const std::string& name, const std::vector<TexGroup::Block>& bks,
-        const TexGroup::Item2& item);
+        const TexGroup::Item& item);
 
     const auto& getStorage(const std::string& name) const { return storageMap.at(name); }
     const auto& getStorageMap() const { return storageMap; }
@@ -200,7 +200,7 @@ void TexGroup::create3D(const std::string& name, const TexGroup::Storage& st){
 }
 
 void TexGroup::write(const std::string& name, const TexGroup::Block& bk,
-    const TexGroup::Item2& item, TexSubFunc f){
+    const TexGroup::Item& item, TexSubFunc f){
 
     auto st = storageMap.at(name);
     auto handle = handleMap.at(name);
@@ -226,24 +226,24 @@ void TexGroup::write(const std::string& name, const TexGroup::Block& bk,
     ss->restore();
 }
 
-void TexGroup::write1D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item){
-    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item2& item){
+void TexGroup::write1D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item){
+    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item& item){
         glTexSubImage1D(st.target, item.level, bk.xoffset,
             st.width,
             item.pixelFormat, item.dataType, bk.data);
     });
 }
 
-void TexGroup::write2D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item){
-    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item2& item){
+void TexGroup::write2D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item){
+    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item& item){
         glTexSubImage2D(st.target, item.level, bk.xoffset, bk.yoffset,
             st.width, st.height,
             item.pixelFormat, item.dataType, bk.data);
     });
 }
 
-void TexGroup::write3D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item2& item){
-    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item2& item){
+void TexGroup::write3D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item){
+    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item& item){
         glTexSubImage3D(st.target, item.level, bk.xoffset, bk.yoffset, bk.zoffset,
             st.width, st.height, st.depth,
             item.pixelFormat, item.dataType, bk.data);
@@ -251,10 +251,10 @@ void TexGroup::write3D(const std::string& name, const TexGroup::Block& bk, const
 }
 
 void TexGroup::writeCubeMap(const std::string& name,
-    const std::vector<TexGroup::Block>& bks, const TexGroup::Item2& item){
+    const std::vector<TexGroup::Block>& bks, const TexGroup::Item& item){
 
     for(int i = 0; i < 6; ++i){
-        write(name, bks[i], item, [=](const Storage& st, const TexGroup::Block& bk, const Item2& item){
+        write(name, bks[i], item, [=](const Storage& st, const TexGroup::Block& bk, const Item& item){
             glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, item.level, bk.xoffset, bk.yoffset,
                 st.width, st.height,
                 item.pixelFormat, item.dataType, bk.data);
