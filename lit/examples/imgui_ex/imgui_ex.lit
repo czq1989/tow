@@ -13,6 +13,7 @@
 #include "imgui.h"
 
 #include <functional>
+#include <string>
 
 namespace ImGui{
 @{imgui math}
