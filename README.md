@@ -62,3 +62,19 @@ A simple [shader toy](https://www.shadertoy.com/) emulator that you can write gl
 An editor that is used to edit game UI elements. If you have a [PSD](https://en.wikipedia.org/wiki/Adobe_Photoshop#File_format) file that all UI elements have already been arranged, drop it into the editor, then you can make some changes again or save it as a JSON file.
 
 ![ui_editor](https://user-images.githubusercontent.com/34378986/99016271-b4e00d00-2591-11eb-955c-4f37120d06e9.gif)
+
+## Credits
+
+Thanks to:
+
+* [ocornut/imgui](https://github.com/ocornut/imgui)
+* [Dav1dde/glad](https://github.com/Dav1dde/glad)
+* [g-truc/glm](https://github.com/g-truc/glm)
+* [alco/psdump](https://github.com/alco/psdump)
+* [juliettef/IconFontCppHeaders](https://github.com/juliettef/IconFontCppHeaders)
+* [syoyo/tinygltf](https://github.com/syoyo/tinygltf)
+* [nlohmann/json](https://github.com/nlohmann/json)
+* [zyedidia/Literate](https://github.com/zyedidia/Literate)
+* [nothings/stb](https://github.com/nothings/stb)
+* [glfw/glfw](https://github.com/glfw/glfw)
+
