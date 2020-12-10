@@ -9,7 +9,6 @@ for /f "usebackq tokens=*" %%i in (`tools\vswhere -version 15.0 -requires Micros
 )
 if defined msbuild (
     tools\premake5 vs2017
-    rm -f tow.exe
     call %msbuild% "projects\tow\tow.vcxproj" /m /v:m /t:build /p:Configuration=Release
     call tow.exe
 ) else (
