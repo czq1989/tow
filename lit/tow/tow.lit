@@ -46,14 +46,15 @@ namespace tow{
 //-----------------------
 // assert
 #ifdef USE_TOW_ASSERT
-    static void mfprintf() {}
-    static void mfprintf(const char* format, ...) {
-        va_list argList;
-        va_start(argList, format);
-        vfprintf(stderr, format, argList);
-        va_end(argList);
-    }
     #ifdef DEBUG
+        static void mfprintf() {}
+        static void mfprintf(const char* format, ...) {
+            va_list argList;
+            va_start(argList, format);
+            vfprintf(stderr, format, argList);
+            va_end(argList);
+        }
+
         #define mAssert(expr, ...)\
         do{\
             if (!(expr)){\
