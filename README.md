@@ -40,7 +40,7 @@ On other platforms, you should install [premake5](https://premake.github.io/down
 
 ```C++
 make -C lit all
-premak5 your_action
+premake5 your_action
 ```
 
 ## Examples
