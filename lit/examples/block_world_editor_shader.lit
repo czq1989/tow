@@ -1,0 +1,268 @@
+@s
+
+//------------------------------------------
+--- block_world_editor_gbuffer.vert
+#version 430 core
+
+in vec3 a_position;
+in vec3 a_normal;
+in vec2 a_texCoord;
+in uint a_id;
+
+uniform mat4 u_pvm;
+
+out vec3 v_position;
+out vec2 v_texCoord;
+out vec3 v_normal;
+flat out uint v_id;
+
+subroutine void Tsm();
+subroutine uniform Tsm u_tsm;
+
+subroutine(Tsm)
+void block(){
+    gl_Position = u_pvm * vec4(a_position, 1);
+}
+
+subroutine(Tsm)
+void moveGizmo(){
+    gl_Position = u_pvm * vec4(a_position, 1);
+    gl_Position.z = -gl_Position.w;
+}
+
+subroutine(Tsm)
+void envCube(){
+    gl_Position = u_pvm * vec4(a_position, 1);
+}
+
+subroutine(Tsm)
+void pureColor(){
+    gl_Position = u_pvm * vec4(a_position, 1);
+}
+
+void main(){
+    u_tsm();
+    v_position = a_position;
+    v_normal = a_normal;
+    v_texCoord = a_texCoord;
+    v_id = a_id;
+}
+---
+
+@include examples\schlick_brdf_shared.lit
+
+--- block_world_editor_gbuffer.frag
+#version 430 core
+
+layout(early_fragment_tests) in;
+
+in vec3 v_position;
+in vec3 v_normal;
+in vec2 v_texCoord;
+flat in uint v_id;
+
+uniform sampler2D s_baseColor;
+uniform samplerCube s_envCube;
+uniform samplerCube s_irradiance;
+uniform vec4 u_gizmoColor;
+uniform vec4 u_pureColor;
+uniform vec3 u_eyePos;
+
+struct Light{
+    vec3 direction;
+    vec3 color;
+    float intensity;
+};
+
+#define KEY     0
+#define FILL    1
+#define BACK    2
+#define AMBIENT 3
+
+uniform DirectionalLighting {
+    Light u_dirLights[4];
+};
+
+@{schlick brdf}
+
+out vec4 f_color;
+out uint f_id;
+
+subroutine void RenderPass();
+subroutine uniform RenderPass u_pass;
+
+subroutine(RenderPass)
+void block(){
+    // compute Lo
+    vec3 V = normalize(u_eyePos - v_position);
+    vec3 N = v_normal;
+    vec3 Li;
+    vec3 L;
+    float NdotL;
+    vec3 Lo = vec3(0);
+    vec3 Fdiff;
+    vec3 Fspec;
+    vec3 baseColor = texture(s_baseColor, v_texCoord).rgb;
+    baseColor = pow(baseColor, vec3(2.2));
+
+    int indexArray[] = int[3]( KEY, FILL, BACK );
+    for(int i = 0; i < indexArray.length(); ++i){
+        int index = indexArray[i];
+
+        L = u_dirLights[index].direction;
+        Li = u_dirLights[index].color * u_dirLights[index].intensity;
+        NdotL = max(0, dot(N, L));
+
+        SchlickBRDF(baseColor, 0, 0.4, V, L, N, Fdiff, Fspec);
+
+        Lo += Fdiff * Li * NdotL;
+    }
+
+     vec3 irradiance = texture(s_irradiance, N).rgb;
+     Li = u_dirLights[AMBIENT].color * u_dirLights[AMBIENT].intensity;
+     vec3 ambient = Li * irradiance * baseColor;
+
+     // output color
+     vec3 color = ambient + Lo;
+     color = pow(color, vec3(1/2.2));
+     f_color = vec4(color, 1);
+}
+
+subroutine(RenderPass)
+void moveGizmo(){
+    f_color = u_gizmoColor;
+}
+
+subroutine(RenderPass)
+void envCube(){
+    f_color = texture(s_envCube, v_position);
+}
+
+subroutine(RenderPass)
+void pureColor(){
+    f_color = u_pureColor;
+}
+
+void main(){
+    u_pass();
+    f_id = v_id;
+}
+---
+
+
+//------------------------------------------
+--- block_world_editor_flag.vert
+#version 430 core
+
+in vec3 a_position;
+in vec3 a_normal;
+in vec2 a_texCoord;
+in uint a_id;
+
+uniform mat4 u_pvm;
+
+void main(){
+    gl_Position = u_pvm * vec4(a_position, 1);
+}
+---
+
+--- block_world_editor_flag.frag
+#version 430 core
+
+out vec2 f_flag;
+
+void main(){
+    f_flag = vec2(1, gl_FragCoord.z);
+}
+---
+
+//------------------------------------------
+--- block_world_editor_outline.vert
+#version 430 core
+
+in vec2 a_position;
+out vec2 v_texCoord;
+
+void main(){
+    gl_Position = vec4(a_position, 0, 1);
+    v_texCoord = a_position * 0.5 + 0.5;
+}
+---
+
+--- block_world_editor_outline.frag
+#version 430 core
+
+in vec2 v_texCoord;
+
+uniform sampler2D s_flag;
+
+out vec2 f_outline;
+
+void main(){
+#if  1
+    const float unit = 1.0;
+    ivec2 offsets[] = ivec2[9](
+        ivec2(-unit, -unit), ivec2(+0, -unit), ivec2(+unit, -unit),
+        ivec2(-unit, +0), ivec2(+0, +0), ivec2(+unit, +0),
+        ivec2(-unit, +unit), ivec2(+0, +unit), ivec2(+unit, +unit)
+        );
+
+    float sum = 0;
+    float depth = texture(s_flag, v_texCoord).y;
+    bool needDepth = texture(s_flag, v_texCoord).x == 0;
+
+    for(int i = 0; i < offsets.length(); ++i){
+        sum += textureOffset(s_flag, v_texCoord, offsets[i]).x;
+        if (needDepth){
+            depth = textureOffset(s_flag, v_texCoord, offsets[i]).y;
+            if (depth > 0) needDepth = false;
+        }
+    }
+    if (sum > 0 && sum < 9){
+        f_outline = vec2(1, depth);
+    }else{
+        discard;
+    }
+
+#endif
+
+}
+---
+
+
+//------------------------------------------
+--- block_world_editor_pp.vert
+#version 430 core
+
+in vec2 a_position;
+out vec2 v_texCoord;
+
+void main(){
+    gl_Position = vec4(a_position, 0, 1);
+    v_texCoord = a_position * 0.5 + 0.5;
+}
+---
+
+--- block_world_editor_pp.frag
+#version 430 core
+
+in vec2 v_texCoord;
+
+uniform sampler2D s_color;
+uniform sampler2D s_outline;
+uniform sampler2D s_depth;
+
+out vec4 f_color;
+
+void main(){
+    vec3 texColor = texture(s_color, v_texCoord).rgb;
+    vec2 outline = texture(s_outline, v_texCoord).rg;
+    float depth = texture(s_depth, v_texCoord).r;
+
+    vec3 color;
+    float factor = step(outline.y, depth) * 0.5 + 0.5;
+    color = mix(texColor, vec3(1, 0.8, 0.15), factor * outline.x);//todo
+
+    f_color = vec4(color, 1);
+}
+---

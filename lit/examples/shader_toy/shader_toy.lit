@@ -31,7 +31,7 @@ private:
 private:
     ColorPassPtr colorPass;
     tow::FramebufferPtr defaultFb;
-    tow::TextureGroupPtr texGroup;
+    tow::TexGroupPtr texGroup;
 
     struct Channel{
         std::string path;

@@ -735,7 +735,7 @@ void SubroutineSender::check(Program* prog){
 // sampler sender
 class SamplerSender{
     struct Texture{
-        TextureGroupPtr texGroup;
+        TexGroupPtr texGroup;
         std::string texName;
     };
 
@@ -776,14 +776,16 @@ void SamplerSender::send(Program* prog){
         }
     }
     for(const auto& pr : textureMap){
-        auto unit = unitMap.at(pr.first);
+        auto it = unitMap.find(pr.first);
+        mAssert(it != unitMap.end(),
+            "failed to get the location of '%s' in shaders '%s.*'", pr.first.c_str(),
+            prog->getShaderTag().c_str());
+
+        auto unit = it->second;
+
         const auto& texName = pr.second.texName;
         auto texGroup = pr.second.texGroup;
         const auto& st = texGroup->getStorage(texName);
-
-        mAssert(samplerMap.has(pr.first),
-            "failed to get the location of '%s' in shaders '%s.*'", pr.first.c_str(),
-            prog->getShaderTag().c_str());
 
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindSampler(unit, st.sampler->getHandle());
@@ -844,6 +846,7 @@ void ProgramOutputSender::send(Program* prog){
 class ProgramInputSender{
 public:
     void send(Program* prog);
+    void check(Program* prog);
 };
 ---
 
@@ -857,6 +860,23 @@ void ProgramInputSender::send(Program* prog){
     if (vertexLayout){
         for(const auto& pr : vertexLayout->getAttribMap()){
             glBindAttribLocation(handle, vertexLayout->getLocation(pr.first), pr.first.c_str());
+        }
+    }
+}
+
+void ProgramInputSender::check(Program* prog){
+    mAssert(prog->isLinked());
+
+    auto handle = prog->getHandle();
+    const auto& vertexLayout = prog->getVertexLayout();
+
+    if (vertexLayout){
+        for(const auto& pr : vertexLayout->getAttribMap()){
+            auto location = glGetAttribLocation(handle, pr.first.c_str());
+            if (location < 0){
+                fprintf(stderr, "failed to get the location of '%s' in '%s.*'\n",
+                    pr.first.c_str(), prog->getShaderTag().c_str());
+            }
         }
     }
 }

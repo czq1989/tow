@@ -30,8 +30,8 @@ class Framebuffer{
 public:
     struct Attachment{
         std::string texName;
-        SamplerParamPtr sp;
         int texelFormat{0};
+        SamplerParamPtr sp;
     };
     struct RenderTarget{
         std::string outVarName;
@@ -76,7 +76,7 @@ private:
     float texWidth{0};
     float texHeight{0};
 
-    TextureGroupPtr texGroup;
+    TexGroupPtr texGroup;
 
     std::vector<RenderTarget> renderTargets;
     std::string depthTexName;
@@ -224,6 +224,7 @@ private:
 
 public:
     static GraphicPipelinePtr create(VertexArrayPtr va, ProgramPtr prog);
+    static GraphicPipelinePtr create(VertexArrayPtr va, const std::vector<Shader>& shaders);
     static GraphicPipelinePtr create(const VertexArray::Buffer& buf, VertexLayoutPtr layout);
     static GraphicPipelinePtr create(const VertexArray::Buffer& buf, VertexLayoutPtr layout,
         const std::vector<Shader>& shaders);
@@ -260,6 +261,13 @@ GraphicPipelinePtr GraphicPipeline::create(VertexArrayPtr va, ProgramPtr prog){
     auto ptr = new GraphicPipeline();
     ptr->vertexArray = va;
     ptr->program = prog;
+    return GraphicPipelinePtr(ptr);
+}
+
+GraphicPipelinePtr GraphicPipeline::create(VertexArrayPtr va, const std::vector<Shader>& shaders){
+    auto ptr = new GraphicPipeline();
+    ptr->vertexArray = va;
+    ptr->program = Program::create(shaders, va->getVertexLayout());
     return GraphicPipelinePtr(ptr);
 }
 

@@ -36,7 +36,7 @@ public:
 
 public:
     void draw(const glm::mat4& pvMat);
-    void setColor(const glm::u8vec3& color) { if (auxLines) auxLines->fillColors(color); }
+    void setColor(const glm::vec4 color) { if (auxLines) auxLines->setColor(color); }
 
 private:
     GltfSkinPtr tfSkin;
@@ -114,7 +114,7 @@ public:
 public:
     void draw(const glm::mat4& pvMat);
 
-    void setColor(const glm::u8vec3& color) { for(const auto& sk : skeletons){ sk->setColor(color); } }
+    void setColor(const glm::vec4& color) { for(const auto& sk : skeletons){ sk->setColor(color); } }
     const auto& getSkeleton(size_t index) { return skeletons.at(index); }
 
 private:

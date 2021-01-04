@@ -12,6 +12,7 @@
 #include "gltf_model_viewer.h"
 #include "shader_toy.h"
 #include "ui_editor.h"
+#include "block_world_editor.h"
 #include "solution.h"
 
 int main(){
@@ -53,6 +54,7 @@ int main(){
     sln->add<GltfModelViewer>("GLTF Model Viewer");
     sln->add<ShaderToy>("Shader Toy");
     sln->add<UiEditor>("UI Editor");
+    sln->add<BlockWorldEditor>("Block World Editor");
     sln->start(0);
 
     // enable gl debug
@@ -63,18 +65,18 @@ int main(){
     while(!glfwWindowShouldClose(window)){
         glfwPollEvents();
 
-        int width, height;
-        glfwGetFramebufferSize(window, &width, &height);
-
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        int width, height;
+        glfwGetFramebufferSize(window, &width, &height);
         sln->show(width, height);
 
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         ImGui::Render();
+
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 

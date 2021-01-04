@@ -31,7 +31,7 @@ public:
 
 private:
     tow::GraphicPipelinePtr pipeline;
-    tow::TextureGroupPtr texGroup;
+    tow::TexGroupPtr texGroup;
     float scaleFactor{1.0f};
 };
 #endif

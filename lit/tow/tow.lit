@@ -244,9 +244,16 @@ public:
         std::vector<GLboolean> bv;
         std::vector<GLint> iv;
         std::vector<GLfloat> fv;
-        std::function<void (const GLboolean* v)> restoreb;
-        std::function<void (const GLint* v)> restorei;
-        std::function<void (const GLfloat* v)> restoref;
+
+        template<typename T>
+        struct Action{
+            std::function<void (T* v)> take;
+            std::function<void (const T* v)> restore;
+        };
+
+        Action<GLboolean> actionb;
+        Action<GLint> actioni;
+        Action<GLfloat> actionf;
     };
 
 private:
@@ -256,10 +263,11 @@ public:
     static tow::ResourcePtr<Snapshot> create();
 
 public:
-    void takeIsEnabled(int what, std::function<void(const GLboolean* v)> f = nullptr);
-    void take(int what, std::function<void(const GLfloat* v)> f);
-    void take(int what, std::function<void(const GLint* v)> f);
+    void pushIsEnabled(int what, std::function<void(const GLboolean* v)> f = nullptr);
+    void push(int what, std::function<void(const GLfloat* v)> f);
+    void push(int what, std::function<void(const GLint* v)> f);
 
+    void take();
     void restore();
 
 public:
@@ -277,45 +285,57 @@ tow::ResourcePtr<Snapshot> Snapshot::create() {
     return tow::ResourcePtr<Snapshot>(new Snapshot());
 }
 
-void Snapshot::takeIsEnabled(int what, std::function<void(const GLboolean* v)> f){
+void Snapshot::pushIsEnabled(int what, std::function<void(const GLboolean* v)> f){
     Record rec;
     rec.what = what;
     rec.bv.resize(16);
-    glGetBooleanv(what, rec.bv.data());
+    rec.actionb.take = [=](GLboolean* v){glGetBooleanv(what, v);};
     if (f){
-        rec.restoreb = f;
+        rec.actionb.restore = f;
     }else{
-        rec.restoreb = [=](const GLboolean* v){ v[0] ? glEnable(what) : glDisable(what);};
+        rec.actionb.restore = [=](const GLboolean* v){ v[0] ? glEnable(what) : glDisable(what);};
     }
     records.push_back(rec);
 }
 
-void Snapshot::take(int what, std::function<void(const GLint* v)> f){
+void Snapshot::push(int what, std::function<void(const GLint* v)> f){
     Record rec;
     rec.what = what;
     rec.iv.resize(16);
-    glGetIntegerv(what, rec.iv.data());
-    rec.restorei = f;
+    rec.actioni.take = [=](GLint* v){glGetIntegerv(what, v);};
+    rec.actioni.restore = f;
     records.push_back(rec);
 }
 
-void Snapshot::take(int what, std::function<void(const GLfloat* v)> f){
+void Snapshot::push(int what, std::function<void(const GLfloat* v)> f){
     Record rec;
     rec.what = what;
     rec.fv.resize(16);
-    glGetFloatv(what, rec.fv.data());
-    rec.restoref = f;
+    rec.actionf.take = [=](GLfloat* v){glGetFloatv(what, v);};
+    rec.actionf.restore = f;
     records.push_back(rec);
+}
+
+void Snapshot::take(){
+    for(auto& r : records){
+        if (r.actionb.take){
+           r.actionb.take(r.bv.data());
+        }else if (r.actioni.take){
+           r.actioni.take(r.iv.data());
+        }else{
+           r.actionf.take(r.fv.data());
+        }
+    }
 }
 
 void Snapshot::restore(){
     for(const auto& r : records){
-         if (r.restoreb){
-            r.restoreb(r.bv.data());
-         }else if (r.restorei){
-            r.restorei(r.iv.data());
+         if (r.actionb.restore){
+            r.actionb.restore(r.bv.data());
+         }else if (r.actioni.restore){
+            r.actioni.restore(r.iv.data());
          }else{
-            r.restoref(r.fv.data());
+            r.actionf.restore(r.fv.data());
          }
     }
 }

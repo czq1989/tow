@@ -107,11 +107,11 @@ public:
         virtual ~Project(){}
 
     public:
-        virtual void setup() {};
-        virtual void exit() {};
+        virtual void setup(){}
+        virtual void exit(){}
         virtual void show(size_t cIndex, size_t pIndex) = 0;
-
-        virtual void manipulateCamera(CameraPtr camera, const Solution::Pane& pane);
+        virtual void show(){}
+        virtual void manipulateCamera(const CameraPtr& camera, const Solution::Pane& pane);
 
     public:
         const auto& getName() const { return projName; }
@@ -221,7 +221,7 @@ void Solution::Layout::update(const ImVec2& initSize, const ImVec2& winSize){
 // project implemention
 Solution::Project::Project(const std::string& n) : projName(n) {}
 
-void Solution::Project::manipulateCamera(CameraPtr camera, const Solution::Pane& pane){
+void Solution::Project::manipulateCamera(const CameraPtr& camera, const Solution::Pane& pane){
     const auto& window = pane.window;
     const auto& input = pane.input;
 
@@ -232,10 +232,10 @@ void Solution::Project::manipulateCamera(CameraPtr camera, const Solution::Pane&
     if (input.x >= window.pos.x && input.x <= window.pos.x + window.size.x
         && input.y >= window.pos.y && input.y <= window.pos.y + window.size.y){
 
-        if (IsMouseDown(ImGuiMouseButton_Left)){
+        if (input.isMouseDown[0]){
              camera->circle(-input.dx * 0.1f, -input.dy * 0.1f);
         }
-        if (IsMouseDown(ImGuiMouseButton_Right)){
+        if (input.isMouseDown[1]){
             camera->move(-input.dx * 0.0005f, input.dy * 0.0005f);
         }
         if (input.scrolly){
@@ -329,6 +329,7 @@ void Solution::show(int width, int height){
 
         EndColumnGroup();
     }
+    curProject->show();
 
     EndSplitter();
 }

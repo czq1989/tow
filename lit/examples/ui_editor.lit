@@ -9,6 +9,7 @@
 #include "tow.h"
 #include "solution.h"
 #include "asset_manager.h"
+#include "example_util.h"
 
 class Renderer;
 using RendererPtr = tow::ResourcePtr<Renderer>;
@@ -20,7 +21,6 @@ using RendererPtr = tow::ResourcePtr<Renderer>;
 @{text}
 @{button}
 @{geometry}
-@{array}
 @{renderer}
 @{ui editor}
 
@@ -117,7 +117,7 @@ static BlockPtr copyBlock(const BlockPtr& block, size_t num){
 
 //----------------------------
 // create blocks from file
-static BlockPtr createBlockFromJson(const std::string& filename, const tow::TextureGroupPtr& texGroup){
+static BlockPtr createBlockFromJson(const std::string& filename, const tow::TexGroupPtr& texGroup){
     using json = nlohmann::json;
 
     std::ifstream ifile(filename);
@@ -250,7 +250,7 @@ static BlockPtr createBlockFromJson(const std::string& filename, const tow::Text
 
 static void createBlocksFromPsdNode(const std::string& filename,
     LayerGroup* parent, const tow::SamplerParamPtr& sp,
-    const tow::TextureGroupPtr& texGroup, std::vector<BlockPtr>& blocks){
+    const tow::TexGroupPtr& texGroup, std::vector<BlockPtr>& blocks){
 
     for(auto child = parent->first_child(); child != nullptr; child = parent->next_child()){
         if (child->is_group()){
@@ -487,7 +487,7 @@ public:
         glm::vec2 imageSize{1};
         int mode{GL_TRIANGLES};
         std::string passName{"color"};
-        tow::TextureGroupPtr texGroup;
+        tow::TexGroupPtr texGroup;
     };
 
 protected:
@@ -536,7 +536,7 @@ public:
     void setTexRect(const glm::vec4& rect) { appearance.uvRect = rect; }
     void setMode(int mode) { appearance.mode = mode; }
     void setPassName(const std::string& n) { appearance.passName = n; }
-    void setTexGroup(const tow::TextureGroupPtr& group) { appearance.texGroup = group; }
+    void setTexGroup(const tow::TexGroupPtr& group) { appearance.texGroup = group; }
 
     // children
     void setChildren(const std::vector<BlockPtr>& c) { children = c; }
@@ -742,7 +742,7 @@ public:
     ~ImageBlock(){}
 public:
     static BlockPtr create(const std::string& n, const std::string& dir,
-        const tow::TextureGroupPtr& texGroup, const std::string& atlasName);
+        const tow::TexGroupPtr& texGroup, const std::string& atlasName);
 };
 ---
 
@@ -750,7 +750,7 @@ public:
 //----------------------------
 // image implemention
 BlockPtr ImageBlock::create(const std::string& n, const std::string& dir,
-    const tow::TextureGroupPtr& texGroup, const std::string& atlasName){
+    const tow::TexGroupPtr& texGroup, const std::string& atlasName){
 
     if (!texGroup->has(atlasName)){
         ImageAsset()->loadImage8(
@@ -781,7 +781,7 @@ public:
     ~ScaleNineBlock(){}
 public:
     static BlockPtr create(const std::string& n, const std::string& dir,
-        const tow::TextureGroupPtr& texGroup, const std::string& atlasName,
+        const tow::TexGroupPtr& texGroup, const std::string& atlasName,
         const glm::vec4& splitLines = glm::vec4{0.45f, 0.45f, 0.55f, 0.55f});
 
 public:
@@ -803,7 +803,7 @@ private:
 //----------------------------
 // scale nine implemention
 BlockPtr ScaleNineBlock::create(const std::string& n, const std::string& dir,
-    const tow::TextureGroupPtr& texGroup, const std::string& atlasName,
+    const tow::TexGroupPtr& texGroup, const std::string& atlasName,
     const glm::vec4& splitLines){
 
     ImageAsset()->loadImage8(dir + atlasName, {texGroup, atlasName}, true);
@@ -1431,55 +1431,6 @@ void GeometryBlock::draw(const RendererPtr& r){
 }
 ---
 
---- array
-//---------------------------
-// a simple vector wrapper
-template<typename T>
-class DynamicArray{
-public:
-    auto nonempty() const { return count > 0; }
-    auto size() const { return count; }
-    auto data() { return v.data(); }
-    const auto& getVector() const { return v; }
-
-    T& at(size_t i) { assert(i < count); return v.at(i); }
-    const T& at(size_t i) const { assert(i < count); return v.at(i); }
-    auto begin() { return v.begin(); }
-    auto end() { return v.begin() + count; }
-
-    T& back() { assert(count); return v.at(count - 1); }
-    const T& back() const { assert(count); return v.at(count - 1); }
-
-    void clear() { count = 0; }
-    void shrink_to_fit() { v.shrink_to_fit(); }
-
-    void push_back(const T& e){
-        if (count < v.size()){
-            v[count] = e;
-        }else{
-            v.push_back(e);
-        }
-        ++count;
-    }
-
-    T& raw_back(){
-        if (count >= v.size()){
-            v.push_back({});
-        }
-        return v.at(count++);
-    }
-
-    void free(){
-        clear();
-        v.clear();
-    }
-
-private:
-    std::vector<T> v;
-    size_t count{0};
-};
----
-
 --- renderer
 //----------------------
 // renderer
@@ -1492,7 +1443,7 @@ public:
         std::string passName;
         int mode{0};
         size_t hash{0};
-        tow::TextureGroupPtr texGroup;
+        tow::TexGroupPtr texGroup;
     };
 
 private:
@@ -1523,6 +1474,8 @@ private:
     tow::GraphicPipelinePtr pipeline;
     tow::FramebufferPtr defaultFb;
 
+    tow::SnapshotPtr snapshot;
+
     DynamicArray<DrawCommand> drawCmds;
 };
 ---
@@ -1547,6 +1500,14 @@ RendererPtr Renderer::create(){
         {"assets/shaders/ui_editor.vert", "assets/shaders/ui_editor.frag"});
 
     r->defaultFb = tow::Framebuffer::create();
+
+    auto snapshot = tow::Snapshot::create();
+    snapshot->pushIsEnabled(GL_DEPTH_TEST);
+    snapshot->pushIsEnabled(GL_BLEND);
+    snapshot->pushIsEnabled(GL_DEPTH_WRITEMASK, [](const GLboolean* v){
+        glDepthMask(v[0]);
+    });
+    r->snapshot = snapshot;
 
     return r;
 }
@@ -1578,12 +1539,15 @@ void Renderer::render(const Solution::Pane& pane){
     // drawing
     defaultFb->bindRect(window.getRect());
 
+    // get current gl states
+    snapshot->take();
+
     // set gl states
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glDepthMask(GL_FALSE);
     glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    glDisable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_BLEND);
 
     // draw elements
      for(size_t i = 0; i < drawCmds.size(); ++i){
@@ -1597,6 +1561,9 @@ void Renderer::render(const Solution::Pane& pane){
 
         tow::drawElements(pipeline, cmd.mode, cmd.startIndex, cmd.indexCount);
     }
+
+    // restore gl states
+    snapshot->restore();
 
     // clear data for next drawing
     indices.clear();
@@ -1671,7 +1638,7 @@ private:
 
     RendererPtr renderer;
 
-    tow::TextureGroupPtr sharedTexGroup;
+    tow::TexGroupPtr sharedTexGroup;
 
     struct Config{
         float bottomBarHeight{30.0f};
@@ -2415,7 +2382,7 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
     SetNextWindowSize({winSize.x, cfg.bottomBarHeight});
 
     static bool openHelpWindow{false};
-    Begin("Botom Bar", nullptr, winFlags);
+    Begin("Bottom Bar", nullptr, winFlags);
         SetCursorPos({GetStyle().WindowPadding.x, cfg.bottomBarHeight * 0.5f - GetFramedItemSize("Menu").y * 0.5f});
 
         if (Button("Menu")){
@@ -2467,7 +2434,7 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
 
                         pixels.resize(st.width * st.height * 4);
 
-                        psdTexGroup->read(name, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+                        psdTexGroup->read(name, pixels.data(), {0, GL_RGBA, GL_UNSIGNED_BYTE});
 
                         ImageAsset()->writeImage(UiEditor::s_psdLayerDirectory + name, st.width, st.height,
                             4, pixels.data());

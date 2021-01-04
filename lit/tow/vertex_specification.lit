@@ -324,7 +324,7 @@ VertexArrayPtr VertexArray::create(const VertexArray::Buffer& buf, VertexLayoutP
             glVertexAttribPointer(location, attrib.componentCount, attrib.componentType,
                 attrib.normalized, vertexLayout->getStride(), (const void*)attrib.offset);
         }
-        else if(attrib.convertedType == GL_INT){
+        else if(attrib.convertedType == GL_INT || attrib.convertedType == GL_UNSIGNED_INT){
             glVertexAttribIPointer(location, attrib.componentCount, attrib.componentType,
                 vertexLayout->getStride(), (const void*)attrib.offset);
         }

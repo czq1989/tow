@@ -154,14 +154,14 @@ const CameraPtr& GltfCamera::getCamera(const glm::mat4& globalTsmMat){
 //--------------------------
 // camera creator
 struct GltfCameraCreator{
-    static std::vector<GltfCameraPtr> create(tinygltf::Model* model);
+    static std::vector<GltfCameraPtr> create(const tinygltf::Model* model);
 };
 ---
 
 --- camera creator implemention
 //-----------------------------------
 // camera creator implemention
-std::vector<GltfCameraPtr> GltfCameraCreator::create(tinygltf::Model* model){
+std::vector<GltfCameraPtr> GltfCameraCreator::create(const tinygltf::Model* model){
     std::vector<GltfCameraPtr> tfCameras;
 
     for(const auto& camera : model->cameras){
@@ -229,7 +229,7 @@ public:
     const auto& getTexGroup() const { return texGroup; }
 
 public:
-    tow::TextureGroupPtr texGroup;
+    tow::TexGroupPtr texGroup;
 
     AlphaMode alphaMode{AlphaMode::OPAQUENESS};
     float alphaCutoff{0};
@@ -299,15 +299,15 @@ void GltfMaterial::send(tow::ProgramPtr program){
 //---------------------
 // material creator
 struct GltfMaterialCreator{
-    static std::vector<GltfMaterialPtr> create(tinygltf::Model* model);
+    static std::vector<GltfMaterialPtr> create(const tinygltf::Model* model);
 };
 ---
 
 --- material creator implemention
 //--------------------------------------
 // material creator implemention
-static void createGltfTexture(tinygltf::Model* model, int texInfoIndex,
-    TextureGroupPtr texGroup, const char* texName){
+static void createGltfTexture(const tinygltf::Model* model, int texInfoIndex,
+    TexGroupPtr texGroup, const char* texName){
 
     auto sp = SamplerParam::create();
     sp->set(GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -342,7 +342,7 @@ static const std::map<std::string, GltfMaterial::AlphaMode> s_gltfAlphaModeMap =
     {"BLEND", GltfMaterial::AlphaMode::BLEND}
 };
 
-std::vector<GltfMaterialPtr> GltfMaterialCreator::create(tinygltf::Model* model){
+std::vector<GltfMaterialPtr> GltfMaterialCreator::create(const tinygltf::Model* model){
     std::vector<GltfMaterialPtr> tfMaterials;
 
     for(const auto& material : model->materials){
@@ -418,7 +418,7 @@ std::vector<GltfMaterialPtr> GltfMaterialCreator::create(tinygltf::Model* model)
 class GltfBuffer{
 public:
     GltfBuffer() {}
-    GltfBuffer(tinygltf::Model* model, size_t accessorIndex);
+    GltfBuffer(const tinygltf::Model* model, size_t accessorIndex);
 
 public:
     bool isPackedTightly() const;
@@ -447,12 +447,14 @@ class GltfPrimitive{
 
 public:
     void update(const std::vector<float>& weights);
+    void sendMaterial() const;
     void draw() const;
 
 public:
     const auto& getMaterial() const { return material; }
     const auto& getPipeline() const { return pipeline; }
     const auto& getMorphTargets() const { return morphTargets; }
+    const auto& getProgram() const { return pipeline->getProgram(); }
 
     const auto& getPositionBuffer() const { return positionBuffer; }
     const auto& getNormalBuffer() const { return normalBuffer; }
@@ -523,7 +525,7 @@ private:
 
 //-------------------------
 // buffer implemention
-GltfBuffer::GltfBuffer(tinygltf::Model* model, size_t accessorIndex){
+GltfBuffer::GltfBuffer(const tinygltf::Model* model, size_t accessorIndex){
     if (accessorIndex < 0) return;
 
     const auto& accessor = model->accessors.at(accessorIndex);
@@ -559,7 +561,7 @@ size_t GltfBuffer::getSize() const{
 
 //--------------------------------
 // primitive implemention
-void GltfPrimitive::draw() const{
+void GltfPrimitive::sendMaterial() const{
     if (material){
         if (material->alphaMode == GltfMaterial::AlphaMode::BLEND){
             glEnable(GL_BLEND);
@@ -577,7 +579,9 @@ void GltfPrimitive::draw() const{
 
         material->send(pipeline->getProgram());
     }
+}
 
+void GltfPrimitive::draw() const{
     if (indexCount > 0){
         drawElementsBaseVertex(pipeline, mode, startIndex, indexCount, baseVertex);
     }else{
@@ -651,7 +655,7 @@ GltfMeshPtr GltfMesh::create(){
 //--------------------
 // mesh creator
 struct GltfMeshCreator{
-    static std::vector<GltfMeshPtr> GltfMeshCreator::create(tinygltf::Model* model,
+    static std::vector<GltfMeshPtr> GltfMeshCreator::create(const tinygltf::Model* model,
         const std::vector<tow::Shader>& shaders, const std::vector<GltfMaterialPtr>& tfMaterials);
 };
 ---
@@ -711,7 +715,7 @@ struct CombinedLayout{
     size_t indexCount{0};
 };
 
-std::vector<GltfMeshPtr> GltfMeshCreator::create(tinygltf::Model* model,
+std::vector<GltfMeshPtr> GltfMeshCreator::create(const tinygltf::Model* model,
     const std::vector<tow::Shader>& shaders, const std::vector<GltfMaterialPtr>& tfMaterials){
 
     std::vector<std::vector<size_t>> meshPrimLayoutHashes;
@@ -1045,14 +1049,14 @@ void GltfSkin::update(){
 //---------------
 // skin creator
 struct GltfSkinCreator{
-    static std::vector<GltfSkinPtr> create(tinygltf::Model* model);
+    static std::vector<GltfSkinPtr> create(const tinygltf::Model* model);
 };
 ---
 
 --- skin creator implemention
 //----------------------------------
 // skin creator implemention
-std::vector<GltfSkinPtr> GltfSkinCreator::create(tinygltf::Model* model){
+std::vector<GltfSkinPtr> GltfSkinCreator::create(const tinygltf::Model* model){
     std::vector<GltfSkinPtr> tfSkins;
 
     std::map<int, GltfJointPtr> jointMap;
@@ -1210,7 +1214,7 @@ private:
 //----------------------
 // animation creator
 struct GltfAnimationCreator{
-    static std::vector<GltfAnimation> create(tinygltf::Model* model,
+    static std::vector<GltfAnimation> create(const tinygltf::Model* model,
     std::vector<GltfNodePtr>& tfNodes);
 };
 ---
@@ -1424,7 +1428,7 @@ void GltfAnimation::reset(){
 
 //-----------------------
 // animation creator
-static GltfSamplerIO getSamplerIO(tinygltf::Model* model, size_t accessorIndex){
+static GltfSamplerIO getSamplerIO(const tinygltf::Model* model, size_t accessorIndex){
     GltfBuffer tfBuffer(model, accessorIndex);
     assert(tfBuffer.byteStride == tfBuffer.byteElement);
     assert(tfBuffer.componentType == GL_FLOAT);
@@ -1445,7 +1449,7 @@ static std::map<std::string, GltfSampler::TargetPathType> s_targetPathMap = {
     {"weights", GltfSampler::TargetPathType::WEIGHTS},
 };
 
-std::vector<GltfAnimation> GltfAnimationCreator::create(tinygltf::Model* model,
+std::vector<GltfAnimation> GltfAnimationCreator::create(const tinygltf::Model* model,
     std::vector<GltfNodePtr>& tfNodes){
 
     std::vector<GltfAnimation> tfAnimations;
@@ -1572,11 +1576,11 @@ void GltfNode::resetMatrices(){
 //-------------------
 // node creator
 struct GltfNodeCreator{
-    static std::vector<GltfNodePtr> create(tinygltf::Model* model,
+    static std::vector<GltfNodePtr> create(const tinygltf::Model* model,
         const std::vector<GltfMeshPtr>& tfMeshes, const std::vector<GltfSkinPtr>& tfSkins,
         const std::vector<GltfCameraPtr>& tfCameras);
 
-    static void buildNodeTree(tinygltf::Model* model, size_t nodeIndex, const glm::mat4& parentMat,
+    static void buildNodeTree(const tinygltf::Model* model, size_t nodeIndex, const glm::mat4& parentMat,
         const std::vector<GltfNodePtr>& tfNodes);
 };
 ---
@@ -1584,7 +1588,7 @@ struct GltfNodeCreator{
 --- node creator implemention
 //=======================================
 // node creator implemention
-void GltfNodeCreator::buildNodeTree(tinygltf::Model* model, size_t nodeIndex, const mat4& parentMat,
+void GltfNodeCreator::buildNodeTree(const tinygltf::Model* model, size_t nodeIndex, const mat4& parentMat,
     const std::vector<GltfNodePtr>& tfNodes){
 
     const auto& node = model->nodes.at(nodeIndex);
@@ -1641,7 +1645,7 @@ void GltfNodeCreator::buildNodeTree(tinygltf::Model* model, size_t nodeIndex, co
     }
 }
 
-std::vector<GltfNodePtr> GltfNodeCreator::create(tinygltf::Model* model,
+std::vector<GltfNodePtr> GltfNodeCreator::create(const tinygltf::Model* model,
     const std::vector<GltfMeshPtr>& tfMeshes, const std::vector<GltfSkinPtr>& tfSkins,
     const std::vector<GltfCameraPtr>& tfCameras){
 
@@ -1721,13 +1725,13 @@ struct GltfAssetInfo{
 // model
 class GltfModel{
 private:
-    GltfModel(tinygltf::Model* m, const std::vector<tow::Shader>& shaders);
+    GltfModel(const tinygltf::Model* m, const std::vector<tow::Shader>& shaders);
 
 public:
     ~GltfModel();
 
 public:
-    static tow::ResourcePtr<GltfModel> create(tinygltf::Model* m, const std::vector<tow::Shader>& shaders);
+    static tow::ResourcePtr<GltfModel> create(const tinygltf::Model* m, const std::vector<tow::Shader>& shaders);
 
 public:
     void update(float dt, CameraPtr camera, size_t aniIndex = 0);
@@ -1763,7 +1767,7 @@ public:
     auto getGlobalTsmMat(size_t index) const { return getNode(index)->getGlobalTsmMat(); }
 
 private:
-    tinygltf::Model* model{nullptr};
+    const tinygltf::Model* model{nullptr};
 
     // data members of model
     std::vector<GltfMaterialPtr> tfMaterials;
@@ -1804,13 +1808,13 @@ using GltfModelPtr = tow::ResourcePtr<GltfModel>;
 --- model implemention
 //================================
 // model implemention
-tow::ResourcePtr<GltfModel> GltfModel::create(tinygltf::Model* m, const std::vector<tow::Shader>& shaders){
+tow::ResourcePtr<GltfModel> GltfModel::create(const tinygltf::Model* m, const std::vector<tow::Shader>& shaders){
     return tow::ResourcePtr<GltfModel>(new GltfModel(m, shaders));
 }
 
 GltfModel::~GltfModel(){}
 
-GltfModel::GltfModel(tinygltf::Model* m, const std::vector<tow::Shader>& shaders) {
+GltfModel::GltfModel(const tinygltf::Model* m, const std::vector<tow::Shader>& shaders) {
     model = m;
 
     //-------------------

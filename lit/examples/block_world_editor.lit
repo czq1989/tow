@@ -1,0 +1,1789 @@
+@s
+
+--- block_world_editor.h
+#ifndef BLOCK_WORLD_EDITOR_H
+#define BLOCK_WORLD_EDITOR_H
+
+#include "tow.h"
+#include "glm.hpp"
+#include "example_util.h"
+#include "camera.h"
+#include "color_pass.h"
+#include "directional_lighting.h"
+
+#include <unordered_map>
+#include <list>
+
+namespace bw{
+@{bounding box}
+@{res loader}
+@{block}
+@{move gizmo}
+@{scene}
+@{scene axis}
+@{environment cube}
+@{collection}
+@{renderer}
+}
+@{block world editor}
+
+
+#endif
+---
+
+
+--- block_world_editor.cpp
+#include "block_world_editor.h"
+
+#include "gtc/matrix_transform.hpp"
+#include "asset_manager.h"
+
+using namespace tow;
+using namespace glm;
+using namespace ImGui;
+
+namespace bw{
+@{bounding box implemention}
+@{res loader implemention}
+@{block implemention}
+@{move gizmo implemention}
+@{scene implemention}
+@{scene axis implemention}
+@{environment cube implemention}
+@{collection implemention}
+@{renderer implemention}
+}
+@{block world editor implemention}
+
+---
+
+
+--- bounding box
+//------------------------
+// bounding box
+struct BoundingBox{
+    bool isHit(const glm::vec3& o, const glm::vec3& d, float& t) const;
+    void tsmAxes(const glm::mat4& tsmMat);
+
+    glm::vec3 c{0}, u{1, 0, 0}, v{0, 1, 0}, w{0, 0, 1};
+    glm::vec3 size{0};
+};
+---
+
+--- bounding box implemention
+bool BoundingBox::isHit(const glm::vec3& o, const glm::vec3& d, float& t) const{
+    // Haines' algorithm
+    auto min_t = std::numeric_limits<float>::min();
+    auto max_t = std::numeric_limits<float>::max();
+    auto sz = size * 0.5f;
+    auto p = c - o;
+    vec3 arr[]{u, v, w};
+
+    for(int i = 0; i < 3; ++i){
+        auto e = dot(arr[i], p);
+        auto f = dot(arr[i], d);
+
+        if (std::abs(f) > 1e-20){
+            auto t1 = (e + sz[i]) / f;
+            auto t2 = (e - sz[i]) / f;
+
+            if (t1 > t2)    std::swap(t1, t2);
+            if (t1 > min_t) min_t = t1;
+            if (t2 < max_t) max_t = t2;
+
+            if (min_t > max_t) return false;
+            if (max_t < 0) return false;
+
+        }else if (-e - sz[i] > 0 || -e + sz[i] < 0){
+            return false;
+        }else if (min_t >= t){
+            return false;
+        }
+    }
+    if (min_t > 0) {
+        t = min_t;
+        return true;
+    }else {
+        t = max_t;
+        return true;
+    }
+}
+
+void BoundingBox::tsmAxes(const glm::mat4& tsmMat){
+    u = normalize(vec3(tsmMat * vec4(u, 1)));
+    v = normalize(vec3(tsmMat * vec4(v, 1)));
+    w = normalize(vec3(tsmMat * vec4(w, 1)));
+}
+---
+
+
+--- res loader
+//---------------
+// res loader
+class ResManager;
+using ResManagerPtr = tow::ResourcePtr<ResManager>;
+
+class ResManager{
+public:
+    using IdType = uint32_t;
+
+    using IndexType = GLuint;
+
+    struct Vertex{
+        glm::vec3 position{0};
+        glm::vec3 normal{0};
+        glm::vec2 texCoord{0};
+        ResManager::IdType id{0};
+    };
+
+    struct Buffer{
+        ResManager::IdType id{0};
+        std::string filename;
+        std::string texName;
+        DynamicArray<Vertex> vertices;
+        DynamicArray<IndexType> indices;
+        glm::vec3 minPt{0};
+        glm::vec3 maxPt{0};
+    };
+
+private:
+    ResManager();
+
+public:
+    static ResManagerPtr get();
+
+public:
+    Buffer load(const std::string& filename, IdType id);
+
+    const auto& getTexGroup() const { return texGroup; }
+    auto genId() { return ++count; }
+
+private:
+    tow::TexGroupPtr texGroup;
+    IdType count{0};
+};
+---
+
+--- res loader implemention
+//-----------------------
+// res loader implemention
+
+ResManagerPtr ResManager::get(){
+    static auto ptr = ResManagerPtr(new ResManager());
+    return ptr;
+}
+
+ResManager::ResManager(){
+    texGroup = tow::TexGroup::create();
+
+    const auto sp = texGroup->getDefaultSampler();
+    sp->set(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    sp->set(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+}
+
+ResManager::Buffer ResManager::load(const std::string& filename, IdType id){
+    auto model = ModelAsset()->loadModel(filename);
+    ResManager::Buffer buf;
+
+    buf.id = id;
+    buf.filename = filename;
+
+    const auto& meshes = model->meshes;
+    assert(!meshes.empty());
+    const auto& primitives = meshes.at(0).primitives;
+    assert(!primitives.empty());
+
+    const auto& prim = primitives.at(0);
+    const auto& attrMap = prim.attributes;
+
+    //-------------------
+    // indices
+    assert(prim.indices >= 0);
+    GltfBuffer indexBuf(model, prim.indices);
+    for(size_t i = 0; i < indexBuf.count; ++i){
+        ResManager::IndexType idx{0};
+        switch(indexBuf.byteElement){
+            case sizeof(GLubyte):
+                idx = *(GLubyte*)(indexBuf.data + indexBuf.byteElement * i);
+                break;
+            case sizeof(GLushort):
+                idx = *(GLushort*)(indexBuf.data + indexBuf.byteElement * i);
+                break;
+            case sizeof(GLuint):
+                idx = *(GLuint*)(indexBuf.data + indexBuf.byteElement * i);
+                break;
+            default:
+                assert(false);
+        }
+        buf.indices.push_back(idx);
+    }
+
+    //---------------------
+    // vertices
+    GltfBuffer posBuf(model, attrMap.at("POSITION"));
+    assert(posBuf.isPackedTightly());
+
+    GltfBuffer normalBuf(model, attrMap.at("NORMAL"));
+    assert(normalBuf.isPackedTightly());
+
+    GltfBuffer texCoordBuf;
+    if (attrMap.find("TEXCOORD_0") != attrMap.end()){
+        texCoordBuf = GltfBuffer(model, attrMap.at("TEXCOORD_0"));
+        assert(texCoordBuf.isPackedTightly());
+    }
+
+    ResManager::Vertex vertex;
+    for(size_t i = 0; i < posBuf.count; ++i){
+        vertex.position = *((vec3*)posBuf.data + i);
+        vertex.normal = *((vec3*)normalBuf.data + i);
+        if (texCoordBuf.data) vertex.texCoord = *((vec2*)texCoordBuf.data + i);
+        vertex.id = buf.id;
+        buf.vertices.push_back(vertex);
+    }
+
+    buf.minPt = {posBuf.minValues[0], posBuf.minValues[1], posBuf.minValues[2]};
+    buf.maxPt = {posBuf.maxValues[0], posBuf.maxValues[1], posBuf.maxValues[2]};
+
+    //--------------------
+    // texture
+    if (!model->textures.empty()){
+        buf.texName = filename + "_baseColor";
+
+        const auto& tex = model->textures.at(0);
+        assert(tex.source >= 0);
+
+        const auto& image = model->images.at(tex.source);
+        const auto& format = getTexFormat({image.component, image.bits, image.pixel_type});
+        auto pixelFormat = format.first;
+        auto texelFormat = format.second;
+        texGroup->create2D(buf.texName, {GL_TEXTURE_2D, 1, texelFormat, nullptr, image.width, image.height});
+        texGroup->write2D(buf.texName, {image.image.data()}, {pixelFormat});
+    }
+
+    return buf;
+}
+---
+
+--- block
+//------------------------
+// block
+class Block;
+using BlockPtr = tow::ResourcePtr<Block>;
+
+class Renderer;
+using RendererPtr = tow::ResourcePtr<Renderer>;
+
+class Block{
+protected:
+    Block(){}
+    Block(const std::string& filename, const std::string& renderPassName);
+public:
+    virtual ~Block(){}
+public:
+    static BlockPtr create(const std::string& filename, const std::string& renderPassName = "block");
+
+public:
+    virtual void draw(const CameraPtr& cam, const RendererPtr& r);
+    virtual BlockPtr copy() const;
+
+public:
+    // setter
+    void translate(const glm::vec3& t);
+    void translateAccum(const glm::vec3& t);
+    void select(bool s) { selected = s; }
+    void setVisible(bool v) { visible = v; }
+    void setMinPt(const glm::vec3& minPt) { buffer.minPt = minPt; }
+    void setMaxPt(const glm::vec3& maxPt) { buffer.maxPt = maxPt; }
+
+    // getter
+    const auto& getBuffer() const { return buffer; }
+    const auto& getTranslation() const { return translation; }
+    auto getId() const { return buffer.id; }
+    const auto& getPassName() const { return passName; }
+    const auto& getTexName() const { return buffer.texName; }
+    auto getCmdHash() const { return cmdHash; }
+    auto& getBoundingBox() { return bbox; }
+    const auto& getMaxPt() const { return buffer.maxPt; }
+    const auto& getMinPt() const { return buffer.minPt; }
+    auto isSelected() const { return selected; }
+    auto isVisible() const { return visible; }
+
+protected:
+    size_t cmdHash{0};
+    std::string passName;
+    ResManager::Buffer buffer;
+
+    BoundingBox bbox;
+
+    glm::vec3 translation{0.0f};
+
+    bool selected{false};
+    bool visible{true};
+};
+---
+
+--- block implemention
+//------------------------
+// block implemention
+Block::Block(const std::string& filename, const std::string& renderPassName){
+    buffer = ResManager::get()->load(filename, ResManager::get()->genId());
+    passName = renderPassName;
+    cmdHash = std::hash<std::string>()(buffer.filename + passName);
+
+    bbox.c = (buffer.minPt + buffer.maxPt) * 0.5f;
+    bbox.size = buffer.maxPt - buffer.minPt;
+}
+
+BlockPtr Block::create(const std::string& filename, const std::string& renderPassName){
+    return BlockPtr(new Block(filename, renderPassName));
+}
+
+void Block::draw(const CameraPtr& cam, const RendererPtr& r){
+    (void)(cam);
+
+    if (!visible) return;
+
+    auto& indexBuf = r->getIndexBuffer();
+    auto& vertexBuf = r->getVertexBuffer();
+
+    r->addDrawCmd(this);
+
+    auto num = (ResManager::IndexType)vertexBuf.size();
+    for(auto index : buffer.indices){
+        indexBuf.push_back(num + index);
+    }
+
+    for(const auto& vertex : buffer.vertices){
+        vertexBuf.push_back(vertex);
+        vertexBuf.back().position += translation;
+    }
+}
+
+void Block::translate(const glm::vec3& t){
+    translation = t;
+}
+
+void Block::translateAccum(const glm::vec3& t){
+    translate(t + translation);
+}
+
+BlockPtr Block::copy() const{
+    auto ptr = new Block();
+    *ptr = *this;
+
+    auto newId = ResManager::get()->genId();
+    ptr->buffer.id = newId;
+    ptr->selected = false;
+    for(auto& v : ptr->buffer.vertices){
+        v.id = newId;
+    }
+    return BlockPtr(ptr);
+}
+---
+
+--- move gizmo
+//------------------
+// move gizmo
+class MoveGizmo : public Block{
+private:
+    MoveGizmo(const std::string& filename);
+public:
+    ~MoveGizmo(){}
+public:
+    static BlockPtr create(const std::string& filename);
+
+public:
+    void draw(const CameraPtr& cam, const RendererPtr& r) override;
+
+public:
+    void setColor(int i, const glm::vec4& c);
+    void resetColors();
+
+    bool isHit(const CameraPtr& cam, const Solution::Pane& pane, int& index);
+
+private:
+    BoundingBox axisBoundingBox[3];
+    glm::vec4 axisColor[3];
+    glm::mat4 axisRotMat[3];
+
+    BoundingBox planeBoundingBox[3];
+    glm::vec4 planeColor[3];
+    glm::mat4 planeRotMat[3];
+
+    float planeLength{0.2f};
+    glm::vec3 planeStartPos{0.1f, 0.1f, 0};
+    glm::vec3 planeCenter{0};
+};
+---
+
+--- move gizmo implemention
+//------------------------------
+// move gizmo implemention
+MoveGizmo::MoveGizmo(const std::string& filename) : Block() {
+    buffer = ResManager::get()->load(filename, 0);
+    passName = "moveGizmo";
+    cmdHash = std::hash<std::string>()(buffer.filename + passName);
+
+    bbox.c = (buffer.minPt + buffer.maxPt) * 0.5f;
+    bbox.size = buffer.maxPt - buffer.minPt;
+
+    //-----------------
+    // three axes
+    axisColor[0] = vec4(1, 0, 0, 1);
+    axisColor[1] = vec4(0, 1, 0, 1);
+    axisColor[2] = vec4(0, 0, 1, 1);
+
+    axisRotMat[0] = glm::rotate(mat4(1.0f), radians(-90.0f), vec3(0, 0, 1));
+    axisRotMat[1] = mat4(1.0f);
+    axisRotMat[2] = glm::rotate(mat4(1.0f), radians(90.0f), vec3(1, 0, 0));
+
+    for(int i = 0; i < 3; ++i){
+        axisBoundingBox[i].tsmAxes(axisRotMat[i]);
+    }
+
+    //-----------------------
+    // three axis planes
+    vec3 positions[] = {
+        vec3{0, 0, 0}, vec3{1, 0, 0},
+        vec3{1, 1, 0}, vec3{0, 1, 0}
+    };
+    ResManager::IndexType indices[] = {
+        0, 1, 2, 2, 3, 0
+    };
+    planeRotMat[0] = mat4(1.0f);//xy
+    planeRotMat[1] = glm::rotate(mat4(1.0f), radians(90.0f), vec3(1, 0, 0));//xz
+    planeRotMat[2] = glm::rotate(mat4(1.0f), radians(-90.0f), vec3(0, 1, 0));//yz
+    for(int r = 0; r < 3; ++r){
+        for(int i = 0; i < 6; ++i){
+            buffer.indices.push_back(indices[i] + (ResManager::IndexType)buffer.vertices.size());
+        }
+        for(int i = 0; i < 4; ++i){
+            ResManager::Vertex vertex;
+            vertex.position = vec3(planeRotMat[r] * vec4(positions[i] * planeLength + planeStartPos, 0));
+            buffer.vertices.push_back(vertex);
+        }
+    }
+    planeColor[0] = vec4(0, 0, 1, 0.5f);
+    planeColor[1] = vec4(0, 1, 0, 0.5f);
+    planeColor[2] = vec4(1, 0, 0, 0.5f);
+
+    for(int i = 0; i < 3; ++i){
+        planeBoundingBox[i].tsmAxes(planeRotMat[i]);
+    }
+
+    planeCenter = planeStartPos + vec3(planeLength, planeLength, 0) * 0.5f;
+}
+
+BlockPtr MoveGizmo::create(const std::string& filename){
+    return BlockPtr(new MoveGizmo(filename));
+}
+
+void MoveGizmo::setColor(int i, const glm::vec4& c){
+    assert(i >= 0 && i <= 5);
+    if (i < 3){
+        axisColor[i] = c;
+    }else{
+        planeColor[i - 3] = c;
+    }
+}
+
+void MoveGizmo::resetColors(){
+    axisColor[0] = vec4(1, 0, 0, 1);
+    axisColor[1] = vec4(0, 1, 0, 1);
+    axisColor[2] = vec4(0, 0, 1, 1);
+    planeColor[0] = vec4(0, 0, 1, 0.5f);
+    planeColor[1] = vec4(0, 1, 0, 0.5f);
+    planeColor[2] = vec4(1, 0, 0, 0.5f);
+}
+
+bool MoveGizmo::isHit(const CameraPtr& cam, const Solution::Pane& pane, int& index){
+    const auto& win = pane.window;
+    auto x = pane.input.x - win.pos.x - win.size.x * 0.5f;
+    auto y = pane.input.y - win.pos.y - win.size.y * 0.5f;
+    const auto& persp = cam->getPersp();
+    auto t = tanf(radians(persp.yfov * 0.5f)) * persp.znear;
+    auto r = t / persp.aspectRatio;
+
+    x = x / win.size.x * 2 * r;
+    y = y / win.size.y * 2 * t;
+    auto z = -persp.znear;
+    auto view2world = inverse(cam->getViewMat());
+    auto p = vec3(view2world * vec4(x, y, z, 1));
+    auto o = cam->getView().eye;
+    auto d = normalize(p - o);
+    float rayt{std::numeric_limits<float>::min()};
+
+    for(int i = 0; i < 3; ++i){
+        if (axisBoundingBox[i].isHit(o, d, rayt)){
+            index = i;
+            return true;
+        }
+    }
+    rayt = std::numeric_limits<float>::min();
+    for(int i = 0; i < 3; ++i){
+        if (planeBoundingBox[i].isHit(o, d, rayt)){
+            index = i + 3;
+            return true;
+        }
+    }
+    return false;
+}
+
+void MoveGizmo::draw(const CameraPtr& cam, const RendererPtr& r){
+    if (!visible) return;
+
+    auto& indexBuf = r->getIndexBuffer();
+    auto& vertexBuf = r->getVertexBuffer();
+
+    auto numVert = (ResManager::IndexType)vertexBuf.size();
+    auto startIndex = indexBuf.size();
+    auto indexCount = buffer.indices.size();
+
+    for(auto index : buffer.indices){
+        indexBuf.push_back(numVert + index);
+    }
+
+    for(const auto& vertex : buffer.vertices){
+        vertexBuf.push_back(vertex);
+    }
+
+    auto dist = glm::length(cam->getView().eye - translation);
+    float scaleFactor = dist * 0.06f;
+
+    auto tMat = glm::translate(mat4(1.0f), translation);
+    auto sMat = glm::scale(mat4(1.0f), vec3(scaleFactor));
+
+    for(int i = 0; i < 3; ++i){
+        auto tsmMat = tMat * axisRotMat[i] * sMat;
+        axisBoundingBox[i].c = vec3(tsmMat * vec4(bbox.c, 1));
+        axisBoundingBox[i].size = bbox.size * scaleFactor;
+    }
+
+    for(int i = 0; i < 3; ++i){
+        auto tsmMat = tMat * planeRotMat[i] * sMat;
+        planeBoundingBox[i].c = vec3(tsmMat * vec4(planeCenter, 1));
+        planeBoundingBox[i].size = vec3{planeLength, planeLength, 0} * scaleFactor;
+    }
+
+    r->addCustomCmd([=, this](const GraphicPipelinePtr& pipeline){
+        auto pvMat = cam->getPerspViewMat();
+
+        const auto& prog = pipeline->getProgram();
+        prog->setSubroutine(GL_VERTEX_SHADER, "u_tsm", passName);
+        prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass", passName);
+
+        // draw axes
+        for(int i = 0; i < 3; ++i){
+            auto pvmMat = pvMat * tMat * axisRotMat[i] * sMat;
+            prog->setUniformf("u_pvm", {&pvmMat, 16});
+            prog->setUniformf("u_gizmoColor", {&axisColor[i], 4});
+            drawElements(pipeline, GL_TRIANGLES, startIndex, indexCount - 18);
+        }
+        // draw planes
+        auto planeIndex = startIndex + indexCount - 18;
+        for(int i = 0; i < 3; ++i){
+            auto pvmMat = pvMat * tMat * sMat;
+            prog->setUniformf("u_pvm", {&pvmMat, 16});
+            prog->setUniformf("u_gizmoColor", {&planeColor[i], 4});
+            drawElements(pipeline, GL_TRIANGLES, planeIndex, 6);
+            planeIndex += 6;
+        }
+    });
+
+}
+---
+
+--- scene
+//---------------
+// scene
+class Scene;
+using ScenePtr = tow::ResourcePtr<Scene>;
+
+class Scene{
+private:
+    Scene(const std::string& n);
+public:
+    virtual ~Scene(){}
+public:
+    static ScenePtr create(const std::string& n);
+
+public:
+    virtual void draw(const CameraPtr& cam, const RendererPtr& r);
+
+public:
+    // block methods
+    BlockPtr addBlock(const std::string& filename);
+    BlockPtr setMoveGizmo(const std::string& filename);
+    BlockPtr setEnvCube(const std::string& filename);
+    BlockPtr add(const BlockPtr& bk);
+    void remove(const BlockPtr& bk);
+    void alignBlock(const BlockPtr& bk);
+
+    // getter
+    auto has(ResManager::IdType id) const { return blockMap.find(id) != blockMap.end(); }
+    auto has(const glm::vec3& t) const { return locationMap.find(getLocationHash(t)) != locationMap.end(); }
+    const BlockPtr& getBlock(ResManager::IdType id) const;
+    const BlockPtr& getBlock(const glm::vec3& t) const;
+    auto& getBlocks() { return blocks; }
+    const auto& getAlignSize() const { return alignSize; }
+
+private:
+    int64_t getLocationHash(const glm::vec3& t) const;
+
+private:
+    std::string name;
+
+    std::list<BlockPtr> blocks;
+    std::unordered_map<ResManager::IdType, BlockPtr> blockMap;
+    std::unordered_map<int64_t, BlockPtr> locationMap;
+    std::unordered_map<ResManager::IdType, glm::vec3> lastLocationMap;
+
+    BlockPtr moveGizmo;
+    BlockPtr envCube;
+    BlockPtr axis;
+
+    bool dirty{false};
+
+    glm::vec3 size{100.0f};
+    glm::vec3 alignSize{2.0f};
+};
+---
+
+--- scene implemention
+//----------------------
+// scene implemention
+Scene::Scene(const std::string& n) : name(n){
+    axis = SceneAxis::create(size * 4.0f);
+}
+
+ScenePtr Scene::create(const std::string& n){
+    return ScenePtr(new Scene(n));
+}
+
+BlockPtr Scene::add(const BlockPtr& bk){
+    blocks.push_back(bk);
+    blockMap.insert({bk->getId(), bk});
+    dirty = true;
+    return bk;
+}
+
+BlockPtr Scene::addBlock(const std::string& filename){
+    return add(Block::create(filename));
+}
+
+BlockPtr Scene::setMoveGizmo(const std::string& filename){
+    moveGizmo = MoveGizmo::create(filename);
+    return moveGizmo;
+}
+
+BlockPtr Scene::setEnvCube(const std::string& filename){
+    envCube = EnvironmentCube::create(filename, size * 2.0f);
+    return envCube;
+}
+
+void Scene::draw(const CameraPtr& cam, const RendererPtr& r){
+    if (dirty){
+        blocks.sort([](const BlockPtr& lhs, const BlockPtr& rhs){
+            return lhs->getCmdHash() < rhs->getCmdHash();
+        });
+        dirty = false;
+    }
+
+    for(const auto& bk : blocks){
+        bk->draw(cam, r);
+    }
+    moveGizmo->draw(cam, r);
+    envCube->draw(cam, r);
+    axis->draw(cam, r);
+}
+
+void Scene::remove(const BlockPtr& bk){
+    blocks.remove(bk);
+    blockMap.erase(bk->getId());
+    locationMap.erase(getLocationHash(bk->getTranslation()));
+    lastLocationMap.erase(bk->getId());
+    dirty = true;
+}
+
+const BlockPtr& Scene::getBlock(ResManager::IdType id) const{
+    auto iter = blockMap.find(id);
+    assert(iter != blockMap.end());
+    return iter->second;
+}
+
+const BlockPtr& Scene::getBlock(const glm::vec3& t) const{
+    auto iter = locationMap.find(getLocationHash(t));
+    assert(iter != locationMap.end());
+    return iter->second;
+}
+
+void Scene::alignBlock(const BlockPtr& bk){
+    auto t = bk->getTranslation();
+    for(int i = 0; i < 3; ++i){
+        auto tmp = step(alignSize[i] * 0.5f, fract(t[i] / alignSize[i]) * alignSize[i]) * alignSize[i];
+        t[i] = floor(t[i] / alignSize[i]) * alignSize[i] + tmp;
+    }
+    bk->translate(t);
+
+    auto it = lastLocationMap.find(bk->getId());
+    if (it != lastLocationMap.end()){
+        locationMap.erase(getLocationHash(it->second));
+    }
+
+    lastLocationMap[bk->getId()] = t;
+    locationMap[getLocationHash(t)] = bk;
+}
+
+int64_t Scene::getLocationHash(const glm::vec3& t) const{
+    dvec3 location = t + size * 0.5f;
+    return (int64_t)(location.x + location.z * size.x + location.y * size.x * size.z);
+}
+---
+
+--- scene axis
+//------------------
+// scene axis
+class SceneAxis : public Block{
+private:
+    SceneAxis(const glm::vec3& size);
+public:
+    static BlockPtr create(const glm::vec3& size);
+public:
+    void draw(const CameraPtr& cam, const RendererPtr& r) override;
+};
+---
+
+
+--- scene axis implemention
+SceneAxis::SceneAxis(const glm::vec3& size) : Block(){
+    passName = "pureColor";
+    cmdHash = std::hash<std::string>()(passName);
+
+    auto halfSize = size * 0.5f;
+
+    ResManager::Vertex vert;
+    vert.position = {-halfSize.x, 0, 0};
+    buffer.vertices.push_back(vert);
+
+    vert.position = {+halfSize.x, 0, 0};
+    buffer.vertices.push_back(vert);
+
+    vert.position = {0, 0, -halfSize.x};
+    buffer.vertices.push_back(vert);
+
+    vert.position = {0, 0, +halfSize.x};
+    buffer.vertices.push_back(vert);
+
+    buffer.indices.push_back(0);
+    buffer.indices.push_back(1);
+    buffer.indices.push_back(2);
+    buffer.indices.push_back(3);
+}
+
+BlockPtr SceneAxis::create(const glm::vec3& size){
+    return BlockPtr(new SceneAxis(size));
+}
+
+void SceneAxis::draw(const CameraPtr& cam, const RendererPtr& r){
+    if (!visible) return;
+
+    auto& indexBuf = r->getIndexBuffer();
+    auto& vertexBuf = r->getVertexBuffer();
+
+    auto startIndex = indexBuf.size();
+
+    auto num = (ResManager::IndexType)vertexBuf.size();
+    for(auto index : buffer.indices){
+        indexBuf.push_back(num + index);
+    }
+
+    for(const auto& vertex : buffer.vertices){
+        vertexBuf.push_back(vertex);
+        vertexBuf.back().position += translation;
+    }
+
+    r->addCustomCmd([=, this](const GraphicPipelinePtr& pipeline){
+        auto pvmMat = cam->getPerspViewMat();
+
+        const auto& prog = pipeline->getProgram();
+        prog->setSubroutine(GL_VERTEX_SHADER, "u_tsm", passName);
+        prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass", passName);
+        prog->setUniformf("u_pvm", {&pvmMat, 16});
+
+        vec4 c1{1, 0, 0, 1};
+        prog->setUniformf("u_pureColor", {&c1, 4});
+        drawElements(pipeline, GL_LINES, startIndex, 2);
+
+        vec4 c2{0, 0, 1, 1};
+        prog->setUniformf("u_pureColor", {&c2, 4});
+        drawElements(pipeline, GL_LINES, startIndex + 2, 2);
+    });
+
+}
+---
+
+--- environment cube
+//----------------------
+// environment cube
+class EnvironmentCube : public Block{
+private:
+    EnvironmentCube(const std::string& filename, const glm::vec3& scale);
+public:
+    ~EnvironmentCube(){}
+public:
+    static BlockPtr create(const std::string& filename, const glm::vec3& scale);
+
+public:
+    void draw(const CameraPtr& cam, const RendererPtr& r) override;
+
+private:
+    glm::vec3 scaleFactor{1.0f};
+};
+---
+
+--- environment cube implemention
+//-----------------------------------
+// environment cube implemention
+EnvironmentCube::EnvironmentCube(const std::string& filename, const glm::vec3& scale) : Block(){
+    ImageAsset()->loadImage8("assets/env_maps/sh_%s.png",
+        {ResManager::get()->getTexGroup(), "s_envCube"});
+
+    buffer = ResManager::get()->load(filename, 0);
+    passName = "envCube";
+    cmdHash = std::hash<std::string>()(buffer.filename + passName);
+
+    bbox.c = (buffer.minPt + buffer.maxPt) * 0.5f;
+    bbox.size = buffer.maxPt - buffer.minPt;
+
+    scaleFactor = scale;
+}
+
+BlockPtr EnvironmentCube::create(const std::string& filename, const glm::vec3& scale){
+    return BlockPtr(new EnvironmentCube(filename, scale));
+}
+
+void EnvironmentCube::draw(const CameraPtr& cam, const RendererPtr& r){
+    if (!visible) return;
+
+    auto& indexBuf = r->getIndexBuffer();
+    auto& vertexBuf = r->getVertexBuffer();
+
+    auto startIndex = indexBuf.size();
+    auto indexCount = buffer.indices.size();
+
+    auto num = (ResManager::IndexType)vertexBuf.size();
+    for(auto index : buffer.indices){
+        indexBuf.push_back(num + index);
+    }
+
+    for(const auto& vertex : buffer.vertices){
+        vertexBuf.push_back(vertex);
+    }
+
+    r->addCustomCmd([=, this](const GraphicPipelinePtr& pipeline){
+        auto pvmMat = glm::scale(cam->getPerspViewMat(), scaleFactor);
+        const auto& prog = pipeline->getProgram();
+
+        prog->setSubroutine(GL_VERTEX_SHADER, "u_tsm", passName);
+        prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass", passName);
+        prog->setUniformf("u_pvm", {&pvmMat, 16});
+        prog->setSampler(ResManager::get()->getTexGroup(), "s_envCube");
+        drawElements(pipeline, GL_TRIANGLES, startIndex, indexCount);
+    });
+}
+---
+
+
+--- renderer
+//------------------
+// renderer
+class Renderer{
+public:
+    using CustomRenderFunc = std::function<void(const tow::GraphicPipelinePtr&)>;
+
+    struct DrawCommand{
+        size_t startIndex{0};
+        size_t indexCount{0};
+        std::string passName;
+        std::string texName;
+        size_t cmdHash{0};
+    };
+
+private:
+    Renderer();
+public:
+    ~Renderer(){}
+public:
+    static RendererPtr create();
+
+public:
+    void render(const CameraPtr& cam, const Solution::Pane& pane);
+
+    void addDrawCmd(const Block* bk);
+    void addCustomCmd(const CustomRenderFunc& f) { customCmds.push_back(f); }
+
+public:
+    // getter
+    auto& getVertexBuffer() { return vertexBuf; }
+    auto& getIndexBuffer() { return indexBuf; }
+    auto getHittingObjectId() const { return hittingObjId; }
+    auto getNumDrawCalls() const { return drawCmds.size() + customCmds.size() + selectedCmds.size(); }
+    auto getNumVertices() const { return vertexBuf.size(); }
+    auto getNumIndices() const { return indexBuf.size(); }
+
+private:
+    tow::FramebufferPtr defaultFb;
+
+    tow::VertexArrayPtr vertexArray;
+    DynamicArray<ResManager::Vertex> vertexBuf;
+    DynamicArray<ResManager::IndexType> indexBuf;
+
+    DynamicArray<DrawCommand> drawCmds;
+    DynamicArray<DrawCommand> selectedCmds;
+    DynamicArray<CustomRenderFunc> customCmds;
+
+    // gbuffer
+    tow::FramebufferPtr gbufferFb;
+    tow::GraphicPipelinePtr gbufferPipeline;
+
+    // selection frame
+    tow::FramebufferPtr flagFb;
+    tow::GraphicPipelinePtr flagPipeline;
+    tow::FramebufferPtr outlineFb;
+    ColorPassPtr outlinePass;
+
+    // post process
+    ColorPassPtr postProcess;
+
+    uint32_t hittingObjId{0};
+
+    DirectionalLightingPtr dirLighting;
+
+    tow::SnapshotPtr snapshot;
+};
+---
+
+--- renderer implemention
+//-------------------------
+// renderer implemention
+RendererPtr Renderer::create(){
+    return RendererPtr(new Renderer());
+}
+Renderer::Renderer(){
+    //--------------
+    // lights
+    ShaderVarTable svTable({
+        "assets/shaders/block_world_editor_gbuffer.vert",
+        "assets/shaders/block_world_editor_gbuffer.frag",
+    });
+    svTable.buildBlock();
+    dirLighting = DirectionalLighting::create(svTable.getUniformBlockMap().get("DirectionalLighting"));
+
+    //----------------------------
+    // vertex layout
+    auto layout = VertexLayout::create();
+    layout->add("a_position", {GL_FLOAT, 3, GL_FALSE, offsetof(ResManager::Vertex, position)});
+    layout->add("a_normal", {GL_FLOAT, 3, GL_FALSE, offsetof(ResManager::Vertex, normal)});
+    layout->add("a_texCoord", {GL_FLOAT, 2, GL_FALSE, offsetof(ResManager::Vertex, texCoord)});
+    layout->add("a_id", {GL_UNSIGNED_INT, 1, GL_FALSE, offsetof(ResManager::Vertex, id), 0, GL_UNSIGNED_INT});
+    layout->stride(sizeof(ResManager::Vertex));
+
+    //-------------------
+    // vertex array
+    auto bufGroup = BufferGroup::create();
+    bufGroup->createBuffer("b_vertex", nullptr,
+        {GL_ARRAY_BUFFER, sizeof(ResManager::Vertex), 0, GL_DYNAMIC_DRAW});
+    bufGroup->createBuffer("b_index", nullptr,
+        {GL_ELEMENT_ARRAY_BUFFER, sizeof(ResManager::IndexType), 0, GL_DYNAMIC_DRAW});
+
+    vertexArray = VertexArray::create({bufGroup, "b_vertex", "b_index"}, layout);
+
+    //--------------------------
+    // default framebuffer
+    defaultFb = Framebuffer::create();
+
+    //----------------
+    // gbuffer
+    auto colorSp = SamplerParam::create();
+
+    auto sp = SamplerParam::create();
+    sp->set(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    sp->set(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+    gbufferFb = Framebuffer::create(1, 1);
+    gbufferFb->addAttachment("f_color", {"s_color", GL_RGBA8, colorSp});
+    gbufferFb->addAttachment("f_id", {"s_id", GL_R32UI, sp});
+    gbufferFb->setDepthAttachment({"s_depth", GL_DEPTH_COMPONENT24, sp});
+
+    //todo:connect program fs output and fb
+
+    gbufferPipeline = GraphicPipeline::create(vertexArray, {
+        "assets/shaders/block_world_editor_gbuffer.vert",
+        "assets/shaders/block_world_editor_gbuffer.frag",
+    });
+
+    const auto& pp = gbufferPipeline->getProgram();//todo
+    pp->setProgramOutputLocation("f_color", 0);
+    pp->setProgramOutputLocation("f_id", 1);
+
+    pp->bindUniformBlock("DirectionalLighting", dirLighting->getBufferBinding());
+
+    //----------------
+    // flag
+    flagFb = Framebuffer::create(1, 1);
+    flagFb->addAttachment("f_flag", {"s_flag", GL_RG32F, sp});
+    flagFb->setDepthAttachment({"s_depth", GL_DEPTH_COMPONENT24, sp});
+
+    flagPipeline = GraphicPipeline::create(vertexArray, {
+        "assets/shaders/block_world_editor_flag.vert",
+        "assets/shaders/block_world_editor_flag.frag",
+    });
+
+    //----------------
+    // outline
+    outlineFb = Framebuffer::create(1, 1);
+    outlineFb->addAttachment("f_outline", {"s_outline", GL_RG32F, sp});
+
+    outlinePass = ColorPass::create({
+        "assets/shaders/block_world_editor_outline.vert",
+        "assets/shaders/block_world_editor_outline.frag",
+    });
+    outlinePass->getProgram()->setSampler(flagFb->getTexGroup(), "s_flag");
+
+    //--------------------------------------
+    // post process
+    postProcess = ColorPass::create({
+        "assets/shaders/block_world_editor_pp.vert",
+        "assets/shaders/block_world_editor_pp.frag",
+    });
+    const auto& prog = postProcess->getProgram();
+    const auto& gbufferTexGroup = gbufferFb->getTexGroup();
+    prog->setSampler(gbufferTexGroup, "s_color");
+    prog->setSampler(gbufferTexGroup, "s_depth");
+    prog->setSampler(outlineFb->getTexGroup(), "s_outline");
+
+    ImageAsset()->loadImage8("assets/env_maps/%s.jpg",
+        {ResManager::get()->getTexGroup(), "s_envCube"});
+    pp->setSampler(ResManager::get()->getTexGroup(), "s_envCube", "s_irradiance");//todo
+
+    prog->checkAll();
+
+    //------------------------
+    // gl state snapshot
+    snapshot = Snapshot::create();
+    snapshot->pushIsEnabled(GL_DEPTH_TEST);
+    snapshot->pushIsEnabled(GL_BLEND);
+    snapshot->pushIsEnabled(GL_CULL_FACE);
+    snapshot->pushIsEnabled(GL_DEPTH_WRITEMASK, [](const GLboolean* v){
+        glDepthMask(v[0]);
+    });
+}
+
+void Renderer::addDrawCmd(const Block* bk){
+    auto count = bk->getBuffer().indices.size();
+    assert(count);
+
+    auto selectedCmd = bk->isSelected();
+
+    if (drawCmds.nonempty() && drawCmds.back().cmdHash == bk->getCmdHash() && !selectedCmd){
+        drawCmds.back().indexCount += count;
+    }else{
+        drawCmds.push_back({indexBuf.size(), count,
+            bk->getPassName(), bk->getTexName(), bk->getCmdHash()});
+
+        if (selectedCmd){
+            selectedCmds.push_back(drawCmds.back());
+        }
+    }
+}
+
+void Renderer::render(const CameraPtr& cam, const Solution::Pane& pane){
+    const auto& win = pane.window;
+    const auto& input = pane.input;
+    auto pvm = cam->getPerspViewMat();
+    uvec2 localPt{std::max(input.x - win.pos.x, 0.0f), std::max(input.y - win.pos.y, 0.0f)};
+
+    //---------------------
+    // fill buffers
+    const auto& bufGroup = vertexArray->getBufferGroup();
+
+    bufGroup->createBuffer("b_vertex", vertexBuf.data(),
+        {GL_ARRAY_BUFFER, sizeof(ResManager::Vertex), vertexBuf.size(), GL_DYNAMIC_DRAW});
+
+    bufGroup->createBuffer("b_index", indexBuf.data(),
+        {GL_ELEMENT_ARRAY_BUFFER, sizeof(ResManager::IndexType), indexBuf.size(), GL_DYNAMIC_DRAW});
+
+    //=======================
+    // draw
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearDepth(1.0f);
+
+    vec2 winSize{win.size.x, win.size.y};
+    winSize *= 1.0f;
+    localPt *= 1.0f;
+
+    // get current gl states
+    snapshot->take();
+
+    //----------------
+    // gbuffer pass
+    gbufferFb->bind(winSize.x, winSize.y);
+    glEnable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDepthMask(GL_TRUE);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    const auto& prog = gbufferPipeline->getProgram();
+    const auto& texGroup = ResManager::get()->getTexGroup();
+
+    prog->setUniformf("u_eyePos", {&cam->getView().eye, 3});
+    prog->setUniformf("u_pvm", {&pvm, 16});
+    for(const auto& cmd : drawCmds){
+        if (!cmd.texName.empty()){
+            prog->setSampler(texGroup, cmd.texName, "s_baseColor");
+        }
+        prog->setSubroutine(GL_VERTEX_SHADER, "u_tsm", cmd.passName);
+        prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass", cmd.passName);
+        drawElements(gbufferPipeline, GL_TRIANGLES, cmd.startIndex, cmd.indexCount);
+    }
+
+    for(const auto& cmd : customCmds){
+        cmd(gbufferPipeline);
+    }
+
+    glReadBuffer(GL_COLOR_ATTACHMENT1);//todo
+    hittingObjId = 0;
+    glReadPixels(localPt.x, localPt.y, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &hittingObjId);
+
+    //---------------------------
+    // selection frame pass
+    outlineFb->bind(winSize.x, winSize.y);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glPolygonOffset(-1, 1);
+
+    flagPipeline->getProgram()->setUniformf("u_pvm", {&pvm, 16});
+
+    for(const auto& cmd : selectedCmds){
+        flagFb->bind(winSize.x, winSize.y);
+        glEnable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        drawElements(flagPipeline, GL_TRIANGLES, cmd.startIndex, cmd.indexCount);
+        glDisable(GL_POLYGON_OFFSET_FILL);
+
+        outlineFb->bind(winSize.x, winSize.y);
+        glDisable(GL_DEPTH_TEST);
+        outlinePass->draw();
+    }
+
+    //-----------------
+    // post process
+    defaultFb->bindRect(win.getRect());
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+    glClear(GL_COLOR_BUFFER_BIT);
+    postProcess->draw();
+
+    //---------------------
+    // restore gl states
+    snapshot->restore();
+
+    //--------------
+    // clear data
+    vertexBuf.clear();
+    indexBuf.clear();
+    drawCmds.clear();
+    selectedCmds.clear();
+    customCmds.clear();
+}
+---
+
+--- collection
+//--------------------------
+// collection
+class Collection;
+using CollectionPtr = tow::ResourcePtr<Collection>;
+
+class Collection{
+private:
+    Collection(){}
+public:
+    ~Collection(){}
+public:
+    static CollectionPtr create();
+
+public:
+    void add(const BlockPtr& bk);
+    void remove(const BlockPtr& bk);
+    void clear();
+
+    void translate(const glm::vec3& t);
+    void translateAccum(const glm::vec3& t);
+    void alignTranslation(const ScenePtr& scene);
+
+    std::vector<BlockPtr> copy();
+
+    // getter
+    auto has(const BlockPtr& bk) { return blockMap.find(bk->getId()) != blockMap.end(); }
+    auto getTranslation() const { return (minPt + maxPt) * 0.5f; }
+    const auto& getBlocks() const { return blockMap; }
+    auto getNumBlocks() const { return blockMap.size(); }
+    glm::vec3 getSize() const { return maxPt - minPt; }
+    auto nonempty() const { return blockMap.size() > 0; }
+    const auto& getMinPt() const { return minPt; }
+    const auto& getMaxPt() const { return maxPt; }
+
+private:
+    void updateTranslation();
+
+private:
+    std::unordered_map<uint32_t, BlockPtr> blockMap;
+    glm::vec3 translation{0};
+
+    glm::vec3 maxPt{0};
+    glm::vec3 minPt{0};
+};
+---
+
+--- collection implemention
+//--------------------------
+// collection implemention
+CollectionPtr Collection::create(){
+    return CollectionPtr(new Collection());
+}
+
+void Collection::updateTranslation(){
+    minPt = {std::numeric_limits<float>::max()};
+    maxPt = {std::numeric_limits<float>::lowest()};
+    for(const auto& pr : blockMap){
+        const auto& t = pr.second->getTranslation();
+        for(int i = 0; i < 3; ++i){
+            minPt[i] = glm::min(minPt[i], t[i] + pr.second->getMinPt()[i]);
+            maxPt[i] = glm::max(maxPt[i], t[i] + pr.second->getMaxPt()[i]);
+        }
+    }
+}
+
+void Collection::add(const BlockPtr& bk){
+    bk->select(true);
+    blockMap.insert({bk->getId(), bk});
+    updateTranslation();
+}
+
+void Collection::remove(const BlockPtr& bk){
+    bk->select(false);
+    blockMap.erase(bk->getId());
+}
+
+void Collection::translate(const glm::vec3& t){
+    for(const auto& pr : blockMap){
+        pr.second->translate(t);
+    }
+    updateTranslation();
+}
+
+void Collection::translateAccum(const glm::vec3& t){
+    for(const auto& pr : blockMap){
+        pr.second->translateAccum(t);
+    }
+    updateTranslation();
+}
+
+void Collection::alignTranslation(const ScenePtr& scene){
+    for(const auto& pr : blockMap){
+        scene->alignBlock(pr.second);
+    }
+    updateTranslation();
+}
+
+std::vector<BlockPtr> Collection::copy(){
+    std::vector<BlockPtr> copyBlocks;
+    for(const auto& pr : blockMap){
+        copyBlocks.push_back(pr.second->copy());
+    }
+    return copyBlocks;
+}
+
+void Collection::clear(){
+    for(const auto& pr : blockMap){
+        pr.second->select(false);
+    }
+    blockMap.clear();
+}
+---
+
+
+--- block world editor
+//--------------------------
+// block world editor
+class BlockWorldEditor : public Solution::Project{
+public:
+    BlockWorldEditor(const std::string& n);
+
+public:
+    void setup() override;
+    void show(size_t cIndex, size_t pIndex) override;
+    void show() override;
+    void exit() override;
+    void manipulateCamera(const CameraPtr& camera, const Solution::Pane& pane) override;
+
+private:
+    void updateSceneView(const Solution::Pane& pane);
+
+    void showMainView(Solution::Pane& pane);
+    void showBlockView(Solution::Pane& pane);
+    void showCollectionView(Solution::Pane& pane);
+    void showPropertyView(Solution::Pane& pane);
+
+    void showBlockMenu();
+
+private:
+    CameraPtr cam;
+
+    bw::ScenePtr curScene;
+
+    bw::RendererPtr renderer;
+
+    bw::CollectionPtr curCollection;
+
+    bw::BlockPtr moveGizmo;
+    bw::BlockPtr envCube;
+
+    bool moving{false};
+    int movingIndex{0};
+    std::vector<std::vector<glm::vec3>> movingAxes;
+};
+---
+
+--- block world editor implemention
+//------------------------------------
+// block world editor implemention
+BlockWorldEditor::BlockWorldEditor(const std::string& name) : Project(name){
+    projLayout.setColumns({
+        {"Column1", 0.8f, {{"Main View", 1.0f}}},
+        {"Column2", 0.2f, {{"Property", 1.0f}}},
+    });
+    projLayout.setContraction({0, 0, 0, 30.0f});
+
+    projLayout.setFunc([](Solution::Layout& layout, const ImVec2& initSize, const ImVec2& winSize){
+        layout.getColumn(1).width = initSize.x * layout.getColumn(1).ratio;
+        layout.getColumn(0).width = winSize.x - layout.getColumn(1).width;
+    });
+}
+
+void BlockWorldEditor::exit(){
+}
+
+void BlockWorldEditor::setup(){
+    cam = Camera::create(
+        Camera::View{vec3{30.0f}, vec3{0.0f}, vec3{0, 1.0f, 0}},
+        Camera::Persp{30.0f, 1.0f, 100000.0f, 1.0f});
+
+    renderer = bw::Renderer::create();
+
+    curScene = bw::Scene::create("Sample");
+
+    for(int i = -20; i <= 20; i += 2){
+        for(int j = -20; j <= 20; j += 2){
+            auto bk = curScene->addBlock("assets/models/blocks/grass.gltf");
+            bk->translate({i, 0, j});
+            curScene->alignBlock(bk);
+        }
+    }
+
+    moveGizmo = curScene->setMoveGizmo("assets/models/axis/scene.gltf");
+    moveGizmo->setVisible(false);
+
+    envCube = curScene->setEnvCube("assets/models/cube/scene.gltf");
+
+    curCollection = bw::Collection::create();
+
+    movingAxes = {
+        {vec3(1, 0, 0)},
+        {vec3(0, 1, 0)},
+        {vec3(0, 0, 1)},
+        {vec3(1, 0, 0), vec3(0, 1, 0)},
+        {vec3(1, 0, 0), vec3(0, 0, 1)},
+        {vec3(0, 1, 0), vec3(0, 0, 1)},
+    };
+}
+
+void BlockWorldEditor::showMainView(Solution::Pane& pane){
+    auto winFlags = ImGuiWindowFlags_NoTitleBar;
+    const auto& win = pane.window;
+
+    PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2, 2));
+    BeginPane(pane.name, pane.height, winFlags);
+        BeginChild("Main Scene");
+
+            //--------------
+            // camera
+            cam->getPersp().aspectRatio = win.size.y / win.size.x;
+            cam->getOrtho().mag = {win.size.x, win.size.y};
+            manipulateCamera(cam, pane);
+
+            //------------------------
+            // draw curScene scene
+            curScene->draw(cam, renderer);
+
+            //--------------
+            // update
+            pane.updateWindow();
+            updateSceneView(pane);
+            pane.updateInput();
+
+            GetWindowDrawList()->AddCallback([](const ImDrawList* parent_list, const ImDrawCmd* cmd){
+                (void)parent_list;
+                auto editor = (BlockWorldEditor*)(cmd->UserCallbackData);
+                editor->renderer->render(editor->cam, editor->projLayout.getPane(0, 0));
+            }, this);
+            GetWindowDrawList()->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+        EndChild();
+    EndPane();
+    PopStyleVar();
+
+    if (curCollection->nonempty() && pane.input.isMouseClicked[1]){
+        OpenPopup("Block Menu");
+    }
+    showBlockMenu();
+}
+
+void BlockWorldEditor::manipulateCamera(const CameraPtr& camera, const Solution::Pane& pane){
+    const auto& window = pane.window;
+    const auto& input = pane.input;
+
+    if (!window.focused){
+        return;
+    }
+
+    if (input.x >= window.pos.x && input.x <= window.pos.x + window.size.x
+        && input.y >= window.pos.y && input.y <= window.pos.y + window.size.y){
+
+        if (IsKeyDown(GLFW_KEY_LEFT_ALT) && input.isMouseDown[0]){
+             camera->circle(-input.dx * 0.1f, -input.dy * 0.1f);
+        }
+        if (IsKeyDown(GLFW_KEY_SPACE) && input.isMouseDown[0]){
+            camera->move(-input.dx * 0.0005f, input.dy * 0.0005f);
+        }
+        if (input.scrolly){
+            camera->pull(input.scrolly * 0.05f);
+        }
+    }
+}
+
+void BlockWorldEditor::updateSceneView(const Solution::Pane& pane){
+    const auto& win = pane.window;
+    const auto& input = pane.input;
+    auto moveGizmoPtr = dynamic_cast<bw::MoveGizmo*>(moveGizmo.getObjectPtr());
+    auto hittingObjId = renderer->getHittingObjectId();
+
+    if (!(win.focused || win.justFocused)){
+        return;
+    }
+
+    bool newSelection = true;
+    if (moveGizmoPtr->isVisible()){
+        int axisIndex{-1};
+        newSelection = !moveGizmoPtr->isHit(cam, pane, axisIndex);
+    }
+    if (newSelection){
+        if (!IsKeyDown(GLFW_KEY_LEFT_ALT) &&
+            !IsKeyDown(GLFW_KEY_SPACE) && input.isMouseClicked[0]){
+
+            if(IsKeyDown(GLFW_KEY_LEFT_CONTROL)){
+                if (hittingObjId > 0){
+                    const auto& bk = curScene->getBlock(hittingObjId);
+                    if (curCollection->has(bk)){
+                        curCollection->remove(bk);
+                    }else{
+                        curCollection->add(bk);
+                    }
+
+                }
+            }else if(IsKeyDown(GLFW_KEY_LEFT_SHIFT)){
+                if (hittingObjId > 0){
+                    auto bk = curScene->getBlock(hittingObjId);
+                    if (!curCollection->has(bk)){
+                        curCollection->add(bk);
+                    }
+
+                    vec3 minPt{std::numeric_limits<float>::max()};
+                    vec3 maxPt{std::numeric_limits<float>::lowest()};
+                    for(const auto& pr : curCollection->getBlocks()){
+                        const auto& t = pr.second->getTranslation();
+                        for(int i = 0; i < 3; ++i){
+                            minPt[i] = glm::min(minPt[i], t[i]);
+                            maxPt[i] = glm::max(maxPt[i], t[i]);
+                        }
+                    }
+                    auto alignSize = curScene->getAlignSize();
+                    for(int i = (int)minPt.x; i <= (int)maxPt.x; i += (int)alignSize.x){
+                        for(int j = (int)minPt.y; j <= (int)maxPt.y; j += (int)alignSize.y){
+                            for(int k = (int)minPt.z; k <= (int)maxPt.z; k += (int)alignSize.z){
+                                vec3 t{i, j, k};
+                                if (curScene->has(t)){
+                                    bk = curScene->getBlock(t);
+                                    if (!curCollection->has(bk)){
+                                        curCollection->add(bk);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }else{
+                if (hittingObjId > 0){
+                    curCollection->clear();
+                    curCollection->add(curScene->getBlock(hittingObjId));
+                }else{
+                    moveGizmoPtr->setVisible(false);
+                    curCollection->clear();
+                }
+            }
+        }
+    }
+    if (curCollection->nonempty()){
+        moveGizmoPtr->setVisible(true);
+        moveGizmoPtr->translate(curCollection->getTranslation());
+    }else{
+        moveGizmoPtr->setVisible(false);
+    }
+
+    if (!moving){
+        moveGizmoPtr->resetColors();
+        if (moveGizmoPtr->isHit(cam, pane, movingIndex)){
+            moveGizmoPtr->setColor(movingIndex, vec4{1, 1, 0, 1});
+
+            if (!IsKeyDown(GLFW_KEY_LEFT_ALT) && input.isMouseClicked[0]){
+                moving = true;
+            }
+        }
+    }
+
+    vec3 trans{0};
+    if (input.isMouseDown[0] && moving){
+        auto f = [=, this](const vec3& axis)->vec3{
+            auto viewAxis = normalize(vec2(cam->getViewMat() * vec4(axis, 0)));
+            auto viewOffset = vec2(input.dx, -input.dy) * 0.05f;
+            auto projLength = dot(viewOffset, viewAxis);
+            return projLength * axis;
+        };
+
+        for(const auto& axis : movingAxes.at(movingIndex)){
+            trans += f(axis);
+        }
+
+        if (curCollection->nonempty()){
+            curCollection->translateAccum(trans);
+            moveGizmoPtr->translate(curCollection->getTranslation());
+        }
+    }
+    if (input.isMouseReleased[0]){
+        moving = false;
+        if (curCollection->nonempty()){
+            curCollection->alignTranslation(curScene);
+            moveGizmoPtr->translate(curCollection->getTranslation());
+        }
+    }
+
+    if (IsKeyReleased(GLFW_KEY_DELETE)){
+        for(const auto& pr : curCollection->getBlocks()){
+            curScene->remove(pr.second);
+        }
+        curCollection->clear();
+    }
+    /*
+    if (IsKeyReleased(GLFW_KEY_A)){
+        curCollection->clear();
+        for(const auto& bk : curScene->getBlocks()){
+            curCollection->add(bk);
+        }
+    }
+    */
+}
+
+void BlockWorldEditor::showCollectionView(Solution::Pane& pane){
+    BeginPane(pane.name, pane.height);
+    EndPane();
+}
+
+void BlockWorldEditor::showBlockView(Solution::Pane& pane){
+    BeginPane(pane.name, pane.height);
+    EndPane();
+}
+
+void BlockWorldEditor::showPropertyView(Solution::Pane& pane){
+    auto winFlags = ImGuiWindowFlags_NoCollapse;
+    BeginPane(pane.name, pane.height, winFlags);
+
+    SetLabelWidth(70);
+    SetWidgetWidth(155);
+
+    vec3 t = curCollection->getTranslation();
+    WidgetWithLeftLabel("Position", [&]{
+        DragFloat3("", (float*)&t, 1.0f, 0, 0, "%.f");
+    });
+
+    SetWidgetWidth(0);
+    SetLabelWidth(0);
+
+    EndPane();
+}
+
+void BlockWorldEditor::show(size_t cIndex, size_t pIndex){
+    switch(cIndex){
+        case 0: showMainView(projLayout.getPane(cIndex, pIndex)); break;
+        case 1: showPropertyView(projLayout.getPane(cIndex, pIndex)); break;
+    }
+}
+
+void BlockWorldEditor::show(){
+    auto& io = GetIO();
+    auto winFlags = ImGuiWindowFlags_NoTitleBar |
+                    ImGuiWindowFlags_NoResize |
+                    ImGuiWindowFlags_NoBringToFrontOnFocus |
+                    ImGuiWindowFlags_NoScrollbar;
+
+    auto winSize = io.DisplayFramebufferScale * io.DisplaySize;
+    SetNextWindowPos({0, winSize.y - 30.0f});
+    SetNextWindowSize({winSize.x, 30.0f});
+
+    static bool openHelpWindow = false;
+
+    Begin("Bottom Bar", nullptr, winFlags);
+    SetCursorPos({GetStyle().WindowPadding.x, 15.0f - GetFramedItemSize("Menu").y * 0.5f});
+    if (Button("Help")){
+        openHelpWindow = true;
+    }
+    SameLine();
+    Text("Draw Calls: %u, FPS: %.1f, Blocks: %u",
+        renderer->getNumDrawCalls(), io.Framerate, curScene->getBlocks().size());
+    End();
+
+    if (openHelpWindow){
+        winFlags = 0;
+        auto fbSize = io.DisplayFramebufferScale * io.DisplaySize;
+        SetNextWindowPos(fbSize * 0.5f, ImGuiCond_Once, {0.5f, 0.5f});
+        SetNextWindowSize({460, 400}, ImGuiCond_Once);
+        if (Begin("Help", &openHelpWindow, winFlags)){
+            Text("Operation Guide");
+            BulletText("Select a range of blocks - SHIFT+CLICK");
+            BulletText("Select more than one block - CTRL+CLICK");
+            BulletText("Rotate view - ALT+LEFT BUTTON");
+            BulletText("Move view - SPACE+LEFT BUTTON");
+        }
+        End();
+    }
+}
+
+void BlockWorldEditor::showBlockMenu(){
+    static ivec3 numParam{0};
+    static ivec3 spacingParam{1};
+    static std::vector<bw::BlockPtr> copyBlocks;
+
+    auto copyFunc = [&](){
+        int xnum = numParam.x + 1;
+        int ynum = numParam.y + 1;
+        int znum = numParam.z + 1;
+
+        for(const auto& bk : copyBlocks){
+            curScene->remove(bk);
+        }
+        copyBlocks.clear();
+
+        auto size = curCollection->getSize();
+        for(int i = 0; i < xnum; ++i){
+            for(int j = 0; j < ynum; ++j){
+                for(int k = 0; k < znum; ++k){
+                    if (i == 0 && j == 0 && k == 0) { continue; }
+
+                    vec3 trans = vec3{i, j, k} * size * vec3(spacingParam);
+
+                    auto blocks = curCollection->copy();
+                    for(const auto& bk : blocks){
+                        bk->translateAccum(trans);
+                        curScene->add(bk);
+                        curScene->alignBlock(bk);
+                    }
+                    copyBlocks.insert(copyBlocks.begin(), blocks.begin(),
+                        blocks.end());
+                }
+            }
+        }
+    };
+
+    if (BeginPopup("Block Menu")){
+        Text("Copy");
+        SetWidgetWidth(100);
+        SetLabelWidth(70);
+        WidgetWithLeftLabel("Num", [&]{
+            if (DragInt3("", (int*)&numParam, 1, 0, 20)){//todo
+                copyFunc();
+            }
+        });
+        WidgetWithLeftLabel("Spacing", [&]{
+            if (DragInt3("", (int*)&spacingParam)){
+                copyFunc();
+            }
+        });
+        SetWidgetWidth(0);
+        SetLabelWidth(0);
+
+        Separator();
+
+        if (BeginMenu("Turn into")){
+            std::string path;
+            if (MenuItem("Grass")){ path = "assets/models/blocks/grass.gltf"; }
+            if (MenuItem("Wood")) { path = "assets/models/blocks/wood.gltf"; }
+            if (MenuItem("Rock")) { path = "assets/models/blocks/rock.gltf"; }
+            if (MenuItem("Brick")){ path = "assets/models/blocks/brick.gltf"; }
+            if (MenuItem("Steve")){ path = "assets/models/blocks/steve.gltf"; }
+
+            if (!path.empty()){
+                std::vector<bw::BlockPtr> newBlocks;
+                for(const auto& pr : curCollection->getBlocks()){
+                    auto bk = curScene->addBlock(path);
+                    bk->translate(pr.second->getTranslation());
+
+                    if (path.find("steve") != std::string::npos){
+                        bk->setMinPt({-1.0f, 0.0f, -1.0f});
+                        bk->setMaxPt({1.0f, 4.0f, 1.0f});
+                    }
+
+                    newBlocks.push_back(bk);
+                    curScene->remove(pr.second);
+                }
+                curCollection->clear();
+                for(const auto& bk : newBlocks){
+                    curCollection->add(bk);
+                    curScene->alignBlock(bk);
+                }
+            }
+            EndMenu();
+        }
+
+        if (IsKeyDown(GLFW_KEY_ESCAPE)){
+            CloseCurrentPopup();
+        }
+
+        EndPopup();
+    }
+    if (!IsPopupOpen("Block Menu")) {
+        numParam = {0};
+        spacingParam = {1};
+        copyBlocks.clear();
+    }
+}
+---
+
+
+
+
+
+
+

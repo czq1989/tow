@@ -15,9 +15,16 @@ shared_lit := examples/auxiliary.lit\
               examples/skeleton_group.lit\
               examples/sh_irradiance.lit\
 
-
 $(shared_src)/dummy.target : $(shared_lit)
 	../tools/lit -t $? dummy.lit -odir $(shared_src)
+
+#--------------------------------------------------
+# asset manager
+asset_mgr_src := ../source/examples/asset_manager
+asset_mgr_lit := examples/asset_manager/*.lit
+
+$(asset_mgr_src)/dummy.target : $(asset_mgr_lit)
+	../tools/lit -t $? dummy.lit -odir $(asset_mgr_src)
 
 #-----------------------------------
 # gltf model viewer
@@ -35,14 +42,6 @@ ui_editor_lit := examples/ui_editor.lit
 $(ui_editor_src)/dummy.target : $(ui_editor_lit)
 	../tools/lit -t $? dummy.lit -odir $(ui_editor_src)
 
-#--------------------------------------------------
-# asset manager
-asset_mgr_src := ../source/examples/asset_manager
-asset_mgr_lit := examples/asset_manager/*.lit
-
-$(asset_mgr_src)/dummy.target : $(asset_mgr_lit)
-	../tools/lit -t $? dummy.lit -odir $(asset_mgr_src)
-
 #--------------------------------------
 # shader toy
 toy_src := ../source/examples/shader_toy
@@ -51,7 +50,6 @@ toy_lit := examples/shader_toy/shader_toy.lit
 $(toy_src)/dummy.target : $(toy_lit)
 	../tools/lit -t $? dummy.lit -odir $(toy_src)
 
-
 #---------------------------------------
 # shader toy shader
 toy_shader_src := ../assets/shaders/shader_toy
@@ -59,6 +57,14 @@ toy_shader_lit := examples/shader_toy/st_*.lit
 
 $(toy_shader_src)/dummy.target : $(toy_shader_lit)
 	../tools/lit -t $? dummy.lit -odir $(toy_shader_src)
+
+#------------------------------------------------
+# block world editor
+block_world_editor_src := ../source/examples/block_world_editor
+block_world_editor_lit := examples/block_world_editor.lit
+
+$(block_world_editor_src)/dummy.target : $(block_world_editor_lit)
+	../tools/lit -t $? dummy.lit -odir $(block_world_editor_src)
 
 #-----------------------------------------
 # shaders
@@ -84,9 +90,10 @@ $(tow_src)/dummy.target : $(tow_lit)
 
 .PHONY: all
 all: $(shared_src)/dummy.target\
+     $(asset_mgr_src)/dummy.target\
      $(viewer_src)/dummy.target\
      $(ui_editor_src)/dummy.target\
-     $(asset_mgr_src)/dummy.target\
+     $(block_world_editor_src)/dummy.target\
      $(toy_src)/dummy.target\
      $(toy_shader_src)/dummy.target\
      $(shader_src)/dummy.target\

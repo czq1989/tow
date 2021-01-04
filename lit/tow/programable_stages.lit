@@ -126,7 +126,7 @@ public:
     using TexSubFunc = std::function<void(const Storage&, const Block&, const Item&)>;
 
 private:
-    TexGroup(){}
+    TexGroup();
 
 public:
     ~TexGroup();
@@ -147,25 +147,33 @@ public:
     void writeCubeMap(const std::string& name, const std::vector<TexGroup::Block>& bks,
         const TexGroup::Item& item);
 
+    void read(const std::string& name, void* data, const TexGroup::Item& item);
+
     const auto& getStorage(const std::string& name) const { return storageMap.at(name); }
     const auto& getStorageMap() const { return storageMap; }
+    const auto& getDefaultSampler() const { return defaultSampler; }
 
     auto getHandle(const std::string& name) const { return handleMap.at(name); }
 
     auto has(const std::string& name) const { return handleMap.find(name) != handleMap.end(); }
-    void read(const std::string& name, size_t level, int pixelFormat, int dataType, void* data);
     void clear();
+    void setDefaultSampler(const SamplerParamPtr& sp) { defaultSampler = sp; }
 
 private:
     std::map<std::string, GLuint> handleMap;
     std::map<std::string, Storage> storageMap;
+    SamplerParamPtr defaultSampler;
 };
-using TextureGroupPtr = ResourcePtr<TexGroup>;
+using TexGroupPtr = ResourcePtr<TexGroup>;
 ---
 
 --- texture implemention
 //----------------------------
 // texture implemention
+TexGroup::TexGroup(){
+    defaultSampler = SamplerParam::create();
+}
+
 void TexGroup::create(const std::string& name, const TexGroup::Storage& st, TexStorageFunc f){
     if (handleMap.find(name) != handleMap.end()){
         DEL_OBJECT(glDeleteTextures, handleMap.at(name));
@@ -179,6 +187,10 @@ void TexGroup::create(const std::string& name, const TexGroup::Storage& st, TexS
 
     storageMap[name] = st;
     handleMap[name] = handle;
+
+    if (storageMap[name].sampler == nullptr){
+        storageMap[name].sampler = defaultSampler;
+    }
 }
 
 void TexGroup::create1D(const std::string& name, const TexGroup::Storage& st){
@@ -212,13 +224,14 @@ void TexGroup::write(const std::string& name, const TexGroup::Block& bk,
     st.depth = bk.depth == 0 ? st.depth >> item.level : bk.depth;
 
     auto ss = Snapshot::create();
-    ss->take(GL_UNPACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_UNPACK_ALIGNMENT, v[0]);});
+    ss->push(GL_UNPACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_UNPACK_ALIGNMENT, v[0]);});
+    ss->take();
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
     glBindTexture(st.target, handle);
     f(st, bk, item);
-    if (st.sampler->hasMipmap()){
+    if (st.sampler && st.sampler->hasMipmap()){
         glGenerateMipmap(st.target);
     }
     glBindTexture(st.target, 0);
@@ -273,18 +286,19 @@ ResourcePtr<TexGroup> TexGroup::create(){
     return ResourcePtr<TexGroup>(new TexGroup());
 }
 
-void TexGroup::read(const std::string& name, size_t level, int pixelFormat, int dataType, void* data){
+void TexGroup::read(const std::string& name, void* data, const TexGroup::Item& item){
     const auto& st = getStorage(name);
     auto handle = getHandle(name);
 
-    mAssert(level < st.levels);
+    mAssert(item.level < st.levels);
 
     auto ss = Snapshot::create();
-    ss->take(GL_PACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_PACK_ALIGNMENT, v[0]);});
+    ss->push(GL_PACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_PACK_ALIGNMENT, v[0]);});
+    ss->take();
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glBindTexture(st.target, handle);
-    glGetTexImage(st.target, level, pixelFormat, dataType, data);
+    glGetTexImage(st.target, item.level, item.pixelFormat, item.dataType, data);
     glBindTexture(st.target, 0);
 
     ss->restore();
@@ -367,7 +381,8 @@ enum ProgramCheckFlags{
     SubroutineUniform   = 1<<1,
     Sampler             = 1<<2,
     Block               = 1<<3,
-    All                 = Uniform | SubroutineUniform | Sampler | Block
+    ProgramInput        = 1<<4,
+    All                 = Uniform | SubroutineUniform | Sampler | Block | ProgramInput
 };
 
 class Program{
@@ -433,10 +448,10 @@ public:
     }
 
     // sampler
-    void setSampler(TextureGroupPtr texture, const std::string& texName, const std::string& uniformName){
+    void setSampler(TexGroupPtr texture, const std::string& texName, const std::string& uniformName){
         samplerSender.setSampler(uniformName, {texture, texName});
     }
-    void setSampler(TextureGroupPtr texture, const std::string& texName) {
+    void setSampler(TexGroupPtr texture, const std::string& texName) {
         samplerSender.setSampler(texName, {texture, texName});
     }
 
@@ -478,13 +493,14 @@ public:
     //-------------------
     // check methods
     void check(ProgramCheckFlags flags) { checkFlags = flags; }
-    void check();
+    void checkAll() { checkFlags = ProgramCheckFlags::All; }
 
 private:
     void send();
     void add(const Shader& shader);
     bool link();
     auto getHandle() const { return progHandle; }
+    void check();
 
 private:
     // program
@@ -620,9 +636,12 @@ bool Program::link(){
 }
 
 void Program::check(){
-    if (checkFlags & ProgramCheckFlags::Uniform) uniformSender.check(this);
-    if (checkFlags & ProgramCheckFlags::SubroutineUniform) subroutineSender.check(this);
-    if (checkFlags & ProgramCheckFlags::Sampler) samplerSender.check(this);
-    if (checkFlags & ProgramCheckFlags::Block) blockSender.check(this);
+    if (checkFlags){
+        if (checkFlags & ProgramCheckFlags::Uniform) uniformSender.check(this);
+        if (checkFlags & ProgramCheckFlags::SubroutineUniform) subroutineSender.check(this);
+        if (checkFlags & ProgramCheckFlags::Sampler) samplerSender.check(this);
+        if (checkFlags & ProgramCheckFlags::Block) blockSender.check(this);
+        if (checkFlags & ProgramCheckFlags::ProgramInput) progInputSender.check(this);
+    }
 }
 ---

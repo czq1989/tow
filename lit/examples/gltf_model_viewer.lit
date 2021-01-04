@@ -49,7 +49,7 @@ private:
     EnvironmentCubePtr envCube;
     EnvironmentCubePtr envIrradianceCube;
 
-    tow::TextureGroupPtr matcapTexGroup;
+    tow::TexGroupPtr matcapTexGroup;
 
     std::vector<std::string> logs;
 
@@ -71,7 +71,7 @@ private:
 
         bool skeleton{false};
         float jointScale{0.0f};
-        glm::u8vec3 boneColor{0, 255, 0};
+        glm::vec4 boneColor{0, 1, 0, 1};
     };
     PanelParameter panelParam;
     std::vector<std::string> modelFilenames;
@@ -174,10 +174,9 @@ void GltfModelViewer::setup(){
     // framebuffers
     colorPassFb = Framebuffer::create();
 
-    auto sp = SamplerParam::create();
     imagePassFb = Framebuffer::create(1, 1);
-    imagePassFb->addAttachment("f_color", {"s_color", sp, GL_RGB8});
-    imagePassFb->setDepthAttachment({"s_depth", sp, GL_DEPTH_COMPONENT24});
+    imagePassFb->addAttachment("f_color", {"s_color", GL_RGB8});
+    imagePassFb->setDepthAttachment({"s_depth", GL_DEPTH_COMPONENT24});
 
     //----------------
     // default camera
@@ -366,7 +365,7 @@ void GltfModelViewer::render(Solution::Pane& pane, bool isMainView){
             }else{
                 prog->setUniformi("u_colorComponentCount", 0);
             }
-
+            tfPrimitive.sendMaterial();
             tfPrimitive.draw();
         }
     }

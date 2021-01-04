@@ -27,19 +27,19 @@ public:
     void fillIndices(const GLushort* indexPtr);
     void fillIndices(const std::vector<GLushort>& indexVec) { fillIndices(indexVec.data()); }
 
-    void fillColors(const glm::u8vec3* colorPtr);
-    void fillColors(const std::vector<glm::u8vec3>& colorVec) { fillColors(colorVec.data()); }
-    void fillColors(const glm::u8vec3& color);
+    void setColor(const glm::vec4& c) { color = c; }
 
     const auto& getPipeline() const { return pipeline; }
+    const auto& getProgram() const { return pipeline->getProgram(); }
 
 public:
-    void draw(int topology, const glm::mat4& pvMat);
+    void draw(int topology, const glm::mat4& pvmMat);
 
 private:
     tow::GraphicPipelinePtr pipeline;
     size_t numPositions{0};
     size_t numIndices{0};
+    glm::vec4 color{1.0f};
 };
 #endif
 ---
@@ -60,11 +60,10 @@ AuxiliaryPtr Auxiliary::create(size_t numPositions, size_t numIndices, const std
 
     auto layout = VertexLayout::create();
     layout->add("a_position", {GL_FLOAT, 3, false, 0});
-    layout->add("a_color", {GL_UNSIGNED_BYTE, 3, true, sizeof(vec3) * numPositions});
 
     auto bufGroup = BufferGroup::create();
     bufGroup->createBuffer("b_vertex", nullptr,
-            {GL_ARRAY_BUFFER, sizeof(vec3) + sizeof(u8vec3), numPositions, GL_DYNAMIC_DRAW});
+            {GL_ARRAY_BUFFER, sizeof(vec3), numPositions, GL_DYNAMIC_DRAW});
 
     bufGroup->createBuffer("b_index", nullptr,
             {GL_ELEMENT_ARRAY_BUFFER, sizeof(GLushort), numIndices, GL_DYNAMIC_DRAW});
@@ -78,8 +77,7 @@ AuxiliaryPtr Auxiliary::create(size_t numPositions, size_t numIndices, const std
         ptr->pipeline = GraphicPipeline::create({bufGroup, "b_vertex", "b_index"}, layout, shaders);
     }
 
-    // fill default colors and indices
-    ptr->fillColors({255, 0, 0});
+    // fill default indices
     std::vector<GLushort> indices(numIndices);
     for(size_t i = 0; i < numIndices; ++i){
         indices.at(i) = (GLushort)i;
@@ -93,22 +91,14 @@ void Auxiliary::fillPositions(const glm::vec3* posPtr){
     pipeline->getBufferGroup()->write("b_vertex", posPtr, 0, numPositions * sizeof(vec3));
 }
 
-void Auxiliary::fillColors(const glm::u8vec3* colorPtr){
-    pipeline->getBufferGroup()->write("b_vertex", colorPtr, numPositions * sizeof(vec3),
-        numPositions * sizeof(u8vec3));
-}
-
-void Auxiliary::fillColors(const glm::u8vec3& color){
-    std::vector<u8vec3> colors(numPositions, color);
-    fillColors(colors);
-}
-
 void Auxiliary::fillIndices(const GLushort* indexPtr){
     pipeline->getBufferGroup()->write("b_index", indexPtr, 0, numIndices * sizeof(GLushort));
 }
 
-void Auxiliary::draw(int topology, const mat4& pvMat){
-    pipeline->getProgram()->setUniformf("u_pvmMat", {&pvMat, 16});
+void Auxiliary::draw(int topology, const mat4& pvmMat){
+    const auto& prog = pipeline->getProgram();
+    prog->setUniformf("u_pvmMat", {&pvmMat, 16});
+    prog->setUniformf("u_color", {&color, 4});
     drawElements(pipeline, topology);
 }
 

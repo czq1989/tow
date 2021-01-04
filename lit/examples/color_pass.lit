@@ -19,7 +19,7 @@ public:
     static ColorPassPtr create(const std::vector<tow::Shader>& shaders);
 
 public:
-    void draw(tow::TextureGroupPtr texGroup, const std::string& name);
+    void draw(tow::TexGroupPtr texGroup, const std::string& name);
     void draw();
 
 public:
@@ -63,7 +63,7 @@ ColorPassPtr ColorPass::create(const std::vector<tow::Shader>& shaders){
     return ColorPassPtr(ptr);
 }
 
-void ColorPass::draw(tow::TextureGroupPtr texGroup, const std::string& name){
+void ColorPass::draw(tow::TexGroupPtr texGroup, const std::string& name){
     pipeline->getProgram()->setSampler(texGroup, name);
     tow::drawElements(pipeline, GL_TRIANGLES);
 }

@@ -51,7 +51,7 @@ public:
     static const int kTexHeight{1024};
 
     struct Glyph{
-        tow::TextureGroupPtr texGroup;
+        tow::TexGroupPtr texGroup;
         std::string texName;
         glm::vec4 uvRect{0, 0, 1, 1};
         glm::vec2 pos{0};
@@ -92,7 +92,7 @@ private:
     std::map<std::string, FontInfo> fontMap;
     std::map<std::string, Glyph> glyphMap;
     std::map<std::string, Record> recordMap;
-    tow::TextureGroupPtr texGroup;
+    tow::TexGroupPtr texGroup;
     tow::SamplerParamPtr sampler;
 };
 ---
@@ -238,7 +238,7 @@ public:
     };
 
     struct Texture{
-        tow::TextureGroupPtr texGroup;
+        tow::TexGroupPtr texGroup;
         std::string texName;
         tow::SamplerParamPtr sp;
     };
@@ -405,6 +405,7 @@ public:
 
 public:
     GltfModelPtr loadModel(const std::string& filename, const std::vector<tow::Shader>& shaders);
+    const tinygltf::Model* loadModel(const std::string& filename);
 
     void destroy();
 
@@ -421,15 +422,12 @@ void ModelCache::destroy(){
     modelMap.clear();
 }
 
-GltfModelPtr ModelCache::loadModel(const std::string& filename, const std::vector<tow::Shader>& shaders){
+const tinygltf::Model* ModelCache::loadModel(const std::string& filename){
     auto it = modelMap.find(filename);
     if (it == modelMap.end()){
         // check model number limit
         if (modelMap.size() >= kMaxNumCacheModels){
-            for(auto pr : modelMap){
-                delete pr.second;
-            }
-            modelMap.clear();
+            destroy();
         }
 
         //---------------------
@@ -459,7 +457,12 @@ GltfModelPtr ModelCache::loadModel(const std::string& filename, const std::vecto
         modelMap.insert({filename, tfModel});
     }
 
-    return GltfModel::create(modelMap.at(filename), shaders);
+    return modelMap.at(filename);
+}
+
+GltfModelPtr ModelCache::loadModel(const std::string& filename, const std::vector<tow::Shader>& shaders){
+    auto m = this->loadModel(filename);
+    return GltfModel::create(m, shaders);
 }
 ---
 

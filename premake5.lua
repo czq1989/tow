@@ -124,6 +124,7 @@ includedirs {
     "source/examples/ui_editor",
     "source/examples/shader_toy",
     "source/examples/gltf_model_viewer",
+    "source/examples/block_world_editor",
     "source/tow",
 }
 
@@ -136,12 +137,14 @@ files {
     "source/examples/*.h",
     "source/examples/asset_manager/*.cpp",
     "source/examples/asset_manager/*.h",
-    "source/examples/ui_editor/*.cpp",
-    "source/examples/ui_editor/*.h",
     "source/examples/gltf_model_viewer/*.cpp",
     "source/examples/gltf_model_viewer/*.h",
     "source/examples/shader_toy/*.cpp",
     "source/examples/shader_toy/*.h",
+    "source/examples/ui_editor/*.cpp",
+    "source/examples/ui_editor/*.h",
+    "source/examples/block_world_editor/*.cpp",
+    "source/examples/block_world_editor/*.h",
 }
 filter "system:Windows"
     files "source/tow/call_stack_win32.cpp"
