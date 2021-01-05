@@ -16,7 +16,7 @@
 
 namespace bw{
 @{bounding box}
-@{res loader}
+@{res manager}
 @{block}
 @{move gizmo}
 @{scene}
@@ -44,7 +44,7 @@ using namespace ImGui;
 
 namespace bw{
 @{bounding box implemention}
-@{res loader implemention}
+@{res manager implemention}
 @{block implemention}
 @{move gizmo implemention}
 @{scene implemention}
@@ -73,7 +73,7 @@ struct BoundingBox{
 --- bounding box implemention
 bool BoundingBox::isHit(const glm::vec3& o, const glm::vec3& d, float& t) const{
     // Haines' algorithm
-    auto min_t = std::numeric_limits<float>::min();
+    auto min_t = std::numeric_limits<float>::lowest();
     auto max_t = std::numeric_limits<float>::max();
     auto sz = size * 0.5f;
     auto p = c - o;
@@ -117,9 +117,9 @@ void BoundingBox::tsmAxes(const glm::mat4& tsmMat){
 ---
 
 
---- res loader
+--- res manager
 //---------------
-// res loader
+// res manager
 class ResManager;
 using ResManagerPtr = tow::ResourcePtr<ResManager>;
 
@@ -164,9 +164,9 @@ private:
 };
 ---
 
---- res loader implemention
+--- res manager implemention
 //-----------------------
-// res loader implemention
+// res manager implemention
 
 ResManagerPtr ResManager::get(){
     static auto ptr = ResManagerPtr(new ResManager());
@@ -1381,7 +1381,7 @@ void BlockWorldEditor::exit(){
 
 void BlockWorldEditor::setup(){
     cam = Camera::create(
-        Camera::View{vec3{30.0f}, vec3{0.0f}, vec3{0, 1.0f, 0}},
+        Camera::View{vec3{36.0f, 52.0f, 45.0f}, vec3{0.0f}, vec3{0, 1.0f, 0}},
         Camera::Persp{30.0f, 1.0f, 100000.0f, 1.0f});
 
     renderer = bw::Renderer::create();
