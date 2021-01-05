@@ -496,7 +496,7 @@ public:
     };
 
 protected:
-    Block(const std::string& n) : name(n) { uid = s_blockCount++; }
+    Block(const std::string& n) : name(n) { id = s_blockCount++; }
 public:
     virtual ~Block(){}
 public:
@@ -510,7 +510,7 @@ public:
 
 public:
     // access methods
-    auto getUid() const { return uid; }
+    auto getId() const { return id; }
     auto& getTag() { return tag; }
     auto& getName() { return name; }
     auto& getLayout() { return layout; }
@@ -555,7 +555,7 @@ public:
     void lock(bool lk) { locked = lk; }
 
 protected:
-    size_t uid{0};
+    size_t id{0};
 
     std::string name;
     std::string tag{"Block"};
@@ -2159,14 +2159,14 @@ void UiEditor::showLayers(const ImVec2& rtPos, Solution::Pane& pane){
 
                         SetNextItemWidth(GetWindowContentRegionWidth() * 0.5f);
 
-                        PushID(bk->getUid());
+                        PushID(bk->getId());
                         ui::showInputText(name);
                         PopID();
                         PopStyleColor(3);
 
                         SameLine();
 
-                        //PushID(bk->getUid());
+                        //PushID(bk->getId());
                         auto p = GetCursorPos();
                         p.x = p.x - cfg.layerItemSpacing.x - GetStyle().FrameRounding;
                         SetCursorPos(p);
@@ -2282,7 +2282,9 @@ void UiEditor::showParameter(const ImVec2& rtPos, Solution::Pane& pane){
         });
         SetWidgetWidth(kWidgetWidth);
         SameLine();
+        PushID("size");
         if (Button(sizeBtnStr)){ linkedSize = !linkedSize; }
+        PopID();
 
         //-----------------------------------------
         // widgets that don't need link button
@@ -2314,7 +2316,9 @@ void UiEditor::showParameter(const ImVec2& rtPos, Solution::Pane& pane){
         });
         SetWidgetWidth(kWidgetWidth);
         SameLine();
+        PushID("scale");
         if (Button(scaleBtnStr)){ linkedScale = !linkedScale; }
+        PopID();
 
         //--------------------
         // appearance
