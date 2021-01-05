@@ -11,6 +11,8 @@
 #include "asset_manager.h"
 #include "example_util.h"
 
+
+namespace ui{
 class Renderer;
 using RendererPtr = tow::ResourcePtr<Renderer>;
 
@@ -22,6 +24,7 @@ using RendererPtr = tow::ResourcePtr<Renderer>;
 @{button}
 @{geometry}
 @{renderer}
+}
 @{ui editor}
 
 #endif
@@ -45,6 +48,7 @@ using RendererPtr = tow::ResourcePtr<Renderer>;
 using namespace ImGui;
 using namespace glm;
 
+namespace ui{
 @{util functions}
 @{block implemention}
 @{color implemention}
@@ -54,6 +58,7 @@ using namespace glm;
 @{button implemention}
 @{geometry implemention}
 @{renderer implemention}
+}
 @{ui editor implemention}
 
 ---
@@ -1608,9 +1613,9 @@ private:
 
     // file block methods
     const auto& getCurFileBlock() const { return fileBlockMap.at(curFilename); }
-    void setCurFileBlock(const std::string& filename, const BlockPtr& bk);
-    void setRootBlockAttrs(const BlockPtr& bk);
-    BlockPtr duplicateFileBlock(const std::string& filename);
+    void setCurFileBlock(const std::string& filename, const ui::BlockPtr& bk);
+    void setRootBlockAttrs(const ui::BlockPtr& bk);
+    ui::BlockPtr duplicateFileBlock(const std::string& filename);
     void deleteBlock();
 
     // misc
@@ -1629,14 +1634,14 @@ public:
 private:
     std::string curFilename;
     int curTabItemFlags{0};
-    std::map<std::string, BlockPtr> fileBlockMap;
+    std::map<std::string, ui::BlockPtr> fileBlockMap;
     std::map<std::string, bool> openFileTabMap;
     std::string lastFilename;
 
-    BlockPtr selectedBlock;
-    BlockPtr triBlock;
+    ui::BlockPtr selectedBlock;
+    ui::BlockPtr triBlock;
 
-    RendererPtr renderer;
+    ui::RendererPtr renderer;
 
     tow::TexGroupPtr sharedTexGroup;
 
@@ -1682,13 +1687,13 @@ void UiEditor::exit(){
     lastFilename = "";
 }
 
-void UiEditor::setCurFileBlock(const std::string& filename, const BlockPtr& rootBlock){
+void UiEditor::setCurFileBlock(const std::string& filename, const ui::BlockPtr& rootBlock){
     fileBlockMap[filename] = rootBlock;
     openFileTabMap[filename] = true;
     lastFilename = "";
 }
 
-void UiEditor::setRootBlockAttrs(const BlockPtr& rootBlock){
+void UiEditor::setRootBlockAttrs(const ui::BlockPtr& rootBlock){
     rootBlock->setPivot({0.5f, 0.5f});
     rootBlock->translate({-cfg.layerPanelSize.x * 0.5f, 0});
     rootBlock->setPassName("grid");
@@ -1696,15 +1701,15 @@ void UiEditor::setRootBlockAttrs(const BlockPtr& rootBlock){
 }
 
 void UiEditor::setup(){
-    renderer = Renderer::create();
+    renderer = ui::Renderer::create();
     sharedTexGroup = tow::TexGroup::create();
 
     // create sample
-    auto sampleBlock = createBlockFromJson(s_jsonDirectory + cfg.samplePath, sharedTexGroup);
+    auto sampleBlock = ui::createBlockFromJson(s_jsonDirectory + cfg.samplePath, sharedTexGroup);
     setRootBlockAttrs(sampleBlock);
     setCurFileBlock(cfg.samplePath, sampleBlock);
 
-    triBlock = GeometryBlock::create("triangle", {}, {});
+    triBlock = ui::GeometryBlock::create("triangle", {}, {});
     triBlock->setMode(GL_TRIANGLES);
 }
 
@@ -1715,20 +1720,20 @@ void UiEditor::handleDroppedFiles(){
         auto suffix = getSuffix(path);
         auto filename = getSubstr(path, {"-\\", "-/"});
         if (suffix == "psd"){
-            auto rootBlock = createBlockFromPsd(path);
+            auto rootBlock = ui::createBlockFromPsd(path);
             setRootBlockAttrs(rootBlock);
             filename = filename.substr(0, filename.size() - 4);
             setCurFileBlock(filename + ".json", rootBlock);
 
         }else if(suffix == "json"){
-            auto rootBlock = createBlockFromJson(path, sharedTexGroup);
+            auto rootBlock = ui::createBlockFromJson(path, sharedTexGroup);
             setRootBlockAttrs(rootBlock);
             setCurFileBlock(filename, rootBlock);
 
         }else if (suffix == "png" || suffix == "jpg"){
             auto dir = path.substr(0, path.find(filename));
             const auto& rootBlock = getCurFileBlock();
-            auto imgBlock = ImageBlock::create(filename, dir, sharedTexGroup, filename);
+            auto imgBlock = ui::ImageBlock::create(filename, dir, sharedTexGroup, filename);
             imgBlock->translate(rootBlock->getLayout().size * 0.5f);
             imgBlock->setPivot({0.5f, 0.5f});
             rootBlock->addChild(imgBlock);
@@ -1835,7 +1840,7 @@ void UiEditor::updateFileView(Solution::Pane& pane){
 
     //---------------------------------------------
     // test triangle whether can be dragged
-    static BlockPtr resizingBlock{nullptr};
+    static ui::BlockPtr resizingBlock{nullptr};
 
     if (window.focused && input.isMouseClicked[ImGuiMouseButton_Left]){
         const auto& layout = selectedBlock->getLayout();
@@ -1844,7 +1849,7 @@ void UiEditor::updateFileView(Solution::Pane& pane){
         for(int i = 0; i < 3; ++i){
             triPoints.push_back(cfg.triEdgeLength * unit[i] + vec2{layout.size.x - cfg.triEdgeLength, 0});
         }
-        Block::BoundingBox bbox;
+        ui::Block::BoundingBox bbox;
         bbox.o = vec2(layout.srtMat * vec3(triPoints.at(1), 1));
         bbox.u = vec2(layout.srtMat * vec3(triPoints.at(0), 1)) - bbox.o;
         bbox.v = vec2(layout.srtMat * vec3(triPoints.at(2), 1)) - bbox.o;
@@ -1857,7 +1862,7 @@ void UiEditor::updateFileView(Solution::Pane& pane){
     //---------------------
     // block selection
     if (!resizingBlock){
-        Block::BoundingBox bbox;
+        ui::Block::BoundingBox bbox;
         for(auto rIter = children.rbegin(); rIter != children.rend(); ++rIter){
             auto& block = (*rIter);
             const auto& layout = block->getLayout();
@@ -1912,14 +1917,14 @@ void UiEditor::updateFileView(Solution::Pane& pane){
         const auto& layout = selectedBlock->getLayout();
         const auto& app = selectedBlock->getAppearance();
         std::vector<vec2> points;
-        std::vector<Block::IndexType> indices;
+        std::vector<ui::Block::IndexType> indices;
         vec2 unit[] = {{0, 0}, {1, 0}, {1, 1}};
         for(int i = 0; i < 3; ++i){
             points.push_back(cfg.triEdgeLength * unit[i] + vec2{layout.size.x - cfg.triEdgeLength, 0});
-            indices.push_back((Block::IndexType)i);
+            indices.push_back((ui::Block::IndexType)i);
         }
 
-        auto ptr = (GeometryBlock*)(triBlock.getObjectPtr());
+        auto ptr = (ui::GeometryBlock*)(triBlock.getObjectPtr());
         ptr->getPoints() = std::move(points);
         ptr->getIndices() = std::move(indices);
         ptr->setColor(u8vec4(u8vec3(255) - u8vec3(app.color), 180));
@@ -2002,54 +2007,54 @@ void UiEditor::showBlock(const ImVec2& ltPos, Solution::Pane& pane){
 
         const ImVec2 btnSize{GetWindowContentRegionWidth(), 0};
         auto dir = UiEditor::s_uiDirectory + "uipack_space/";
-        BlockPtr newBlock;
+        ui::BlockPtr newBlock;
 
         if (Button("Color", btnSize)){
-            newBlock = ColorBlock::create("");
+            newBlock = ui::ColorBlock::create("");
             newBlock->setSize({100.0f, 100.0f});
             newBlock->setColor(linearRand(ivec3(0), ivec3(255)));
         }
         if (Button("Image", btnSize)){
-            newBlock = ImageBlock::create("", dir, sharedTexGroup, cfg.atlasName);
+            newBlock = ui::ImageBlock::create("", dir, sharedTexGroup, cfg.atlasName);
             newBlock->setSize({80.0f, 80.0f});
             newBlock->setTexRect({300.0f, 220.0f, 80.0f, 80.0f});
         }
         if (Button("Scale9", btnSize)){
-            newBlock = ScaleNineBlock::create("", dir, sharedTexGroup, cfg.atlasName);
+            newBlock = ui::ScaleNineBlock::create("", dir, sharedTexGroup, cfg.atlasName);
             newBlock->setSize({100.0f, 100.0f});
             newBlock->setTexRect({100.0f, 13.0f, 100.0f, 100.0f});
         }
         if (Button("Text", btnSize)){
-            newBlock = TextBlock::create("text", cfg.fontname, 24);
+            newBlock = ui::TextBlock::create("text", cfg.fontname, 24);
             newBlock->setSize({100.0f, 50.0f});
             newBlock->setColor({50, 50, 50});
         }
         if (Button("Button", btnSize)){
-            auto textBk = TextBlock::create("button", cfg.fontname, 24, TextBlock::Alignment::Center);
+            auto textBk = ui::TextBlock::create("button", cfg.fontname, 24, ui::TextBlock::Alignment::Center);
             textBk->setColor({50, 50, 50});
 
-            auto normalBk = ScaleNineBlock::create("normal", dir, sharedTexGroup, cfg.atlasName,
+            auto normalBk = ui::ScaleNineBlock::create("normal", dir, sharedTexGroup, cfg.atlasName,
                 {0.44f, 0.50f, 0.55f, 0.66f});
 
             normalBk->setSize({100.0f, 45.0f});
             normalBk->setTexRect({384.0f, 36.0f, 21.0f, 27.0f});
 
-            auto pressedBk = ScaleNineBlock::create("pressed", dir, sharedTexGroup, cfg.atlasName,
+            auto pressedBk = ui::ScaleNineBlock::create("pressed", dir, sharedTexGroup, cfg.atlasName,
                 {0.44f, 0.50f, 0.55f, 0.66f});
 
             pressedBk->setSize({100.0f, 45.0f});
             pressedBk->setTexRect({384.0f, 92.0f, 21.0f, 27.0f});
 
-            auto disabledBk = ScaleNineBlock::create("disabled", dir, sharedTexGroup, cfg.atlasName,
+            auto disabledBk = ui::ScaleNineBlock::create("disabled", dir, sharedTexGroup, cfg.atlasName,
                 {0.44f, 0.50f, 0.55f, 0.66f});
 
             disabledBk->setSize({100.0f, 100.0f});
             disabledBk->setTexRect({384.0f, 10.0f, 21.0f, 27.0f});
 
-            newBlock = ButtonBlock::create("button", textBk, {normalBk, pressedBk, disabledBk});
+            newBlock = ui::ButtonBlock::create("button", textBk, {normalBk, pressedBk, disabledBk});
         }
         if (Button("Block", btnSize)){
-            newBlock = Block::create("");
+            newBlock = ui::Block::create("");
             newBlock->setSize({50.0f, 50.0f});
             newBlock->setColor({255, 128, 128});
         }
@@ -2099,8 +2104,8 @@ void UiEditor::showLayers(const ImVec2& rtPos, Solution::Pane& pane){
             size_t index{0};
             size_t selectedIndex = (size_t)-1;
             size_t targetIndex = (size_t)-1;
-            static BlockPtr visAloneBlock;
-            static BlockPtr unlockedAloneBlock;
+            static ui::BlockPtr visAloneBlock;
+            static ui::BlockPtr unlockedAloneBlock;
 
             for(auto rIter = children.rbegin(); rIter != children.rend(); ++rIter, ++index){
                 auto& bk = (*rIter);
@@ -2155,7 +2160,7 @@ void UiEditor::showLayers(const ImVec2& rtPos, Solution::Pane& pane){
                         SetNextItemWidth(GetWindowContentRegionWidth() * 0.5f);
 
                         PushID(bk->getUid());
-                        showInputText(name);
+                        ui::showInputText(name);
                         PopID();
                         PopStyleColor(3);
 
@@ -2248,7 +2253,7 @@ void UiEditor::showParameter(const ImVec2& rtPos, Solution::Pane& pane){
         // tag
         SetWidgetWidth(75);
         WidgetWithLeftLabel("Tag", [&]{
-            showInputText(selectedBlock->getTag());
+            ui::showInputText(selectedBlock->getTag());
         });
 
         //=====================
@@ -2328,7 +2333,7 @@ void UiEditor::showParameter(const ImVec2& rtPos, Solution::Pane& pane){
             PushStyleColor(ImGuiCol_Text,
                 (texGroup && texGroup->has(app.atlasName)) ? GetStyleColorVec4(ImGuiCol_Text) : ImVec4(1, 0.5f, 0.5f, 1.0f));
 
-            if (showInputText(app.atlasName)){
+            if (ui::showInputText(app.atlasName)){
                 if (texGroup){
                     ImageAsset()->loadImage8(
                         app.atlasName, {texGroup, app.atlasName}, true);
@@ -2361,7 +2366,7 @@ void UiEditor::showParameter(const ImVec2& rtPos, Solution::Pane& pane){
     End();
 }
 
-BlockPtr UiEditor::duplicateFileBlock(const std::string& filename){
+ui::BlockPtr UiEditor::duplicateFileBlock(const std::string& filename){
     auto rootBlock = getCurFileBlock();
     auto dup = rootBlock->copy(filename);
     for(const auto& child : rootBlock->getChildren()){
@@ -2443,7 +2448,7 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
 
                     writeBlocksToJson(rootBlock, UiEditor::s_jsonDirectory + curFilename);
 
-                    rootBlock = createBlockFromJson(UiEditor::s_jsonDirectory + curFilename, psdTexGroup);
+                    rootBlock = ui::createBlockFromJson(UiEditor::s_jsonDirectory + curFilename, psdTexGroup);
                     setCurFileBlock(curFilename, rootBlock);
                     setRootBlockAttrs(rootBlock);
                 }else{
@@ -2515,7 +2520,7 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
             SetLabelWidth(50);
             SetWidgetWidth(200);
             WidgetWithLeftLabel("Name", [&]{
-                showInputText(otherFilename);
+                ui::showInputText(otherFilename);
             });
             SetLabelWidth(0);
             SetWidgetWidth(0);
@@ -2544,7 +2549,7 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
             SetLabelWidth(50);
             SetWidgetWidth(200);
             WidgetWithLeftLabel("Name", [&]{
-                showInputText(newFilename);
+                ui::showInputText(newFilename);
             });
             WidgetWithLeftLabel("Size", [&]{
                 InputFloat2("", &newFileBlockSize.x, "%.f");
@@ -2557,7 +2562,7 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
                     newFilename += ".json";
                 }
 
-                auto bk = Block::create(newFilename);
+                auto bk = ui::Block::create(newFilename);
                 bk->setSize({newFileBlockSize.x, newFileBlockSize.y});
                 setRootBlockAttrs(bk);
                 setCurFileBlock(newFilename, bk);
@@ -2580,7 +2585,7 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
             const auto& rootBlock = getCurFileBlock();
             BeginChild("stats", {GetWindowContentRegionWidth() * 0.5f, GetFontSize()});
             Text("Draw Calls: %u, FPS: %.1f, Blocks: %u, Vertices: %u, Indices: %u, Textures: %u",
-                max(renderer->getDrawCmds().size(), 2u) - 2, io.Framerate, getCurFileBlock()->getChildren().size(),
+                renderer->getDrawCmds().size(), io.Framerate, getCurFileBlock()->getChildren().size(),
                 renderer->getBufferGroup()->getItem("b_vertex").elementCount,
                 renderer->getBufferGroup()->getItem("b_index").elementCount,
                 sharedTexGroup->getStorageMap().size());
