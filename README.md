@@ -46,13 +46,13 @@ premake5 your_action
 
 For most people, enter the command:
 
-```C++
+```bash
 git clone https://github.com/czq1989/tow.git
 ```
 
 But if you are in China and the cloning speed is slow, you can enter the command:
 
-```
+```bash
 git clone https://gitclone.com/github.com/czq1989/tow.git
 ```
 
