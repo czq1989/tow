@@ -1676,6 +1676,7 @@ void BlockWorldEditor::show(){
             BulletText("Select more than one block - CTRL+CLICK");
             BulletText("Rotate view - ALT+LEFT BUTTON");
             BulletText("Move view - SPACE+LEFT BUTTON");
+            BulletText("Scale view - MIDDLE BUTTON");
         }
         End();
     }
