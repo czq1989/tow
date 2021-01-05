@@ -27,7 +27,6 @@ void init(){
 
 void render(float x, float y, float w, float h){    
     fb->bind(x, y, w, h);
-    glClear(GL_COLOR_BUFFER_BIT);
     tow::drawArrays(pipeline, GL_TRIANGLES);
 }
 ```
@@ -36,7 +35,7 @@ void render(float x, float y, float w, float h){
 
 On Windows, make sure you have installed vs2017 or later before running premake5.bat.
 
-On other platforms, you should install [premake5](https://premake.github.io/download.html), [make](https://www.gnu.org/software/make/) and [Literate](https://github.com/zyedidia/Literate) corresponding to the platform, and then enter the command:
+On other platforms, you should install [premake5](https://premake.github.io/download.html), [make](https://www.gnu.org/software/make/) and [Literate](https://github.com/zyedidia/Literate) corresponding to the platform, and then type in the command:
 
 ```C++
 make -C lit all
@@ -62,6 +61,12 @@ A simple [shader toy](https://www.shadertoy.com/) emulator that you can write gl
 An editor that is used to edit game UI elements. If you have a [PSD](https://en.wikipedia.org/wiki/Adobe_Photoshop#File_format) file that all UI elements have already been arranged, drop it into the editor, then you can make some changes again or save it as a JSON file.
 
 ![ui_editor](https://user-images.githubusercontent.com/34378986/99016271-b4e00d00-2591-11eb-955c-4f37120d06e9.gif)
+
+### Block World Editor
+
+A block editor like Minecraft, but easier to select and create blocks.
+
+![block_world_editor](https://user-images.githubusercontent.com/34378986/103600044-7f2c2480-4f41-11eb-992b-d25c1bac5ee7.gif)
 
 ## Credits
 
