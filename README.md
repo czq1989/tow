@@ -82,7 +82,7 @@ An editor that is used to edit game UI elements. If you have a [PSD](https://en.
 
 A block editor like Minecraft, but easier to select and create blocks.
 
-![block_world_editor](https://github.com/czq1989/qviewer/blob/master/block_world_editor.gif)
+![block_world_editor](https://user-images.githubusercontent.com/34378986/103600044-7f2c2480-4f41-11eb-992b-d25c1bac5ee7.gif)
 
 ## Credits
 
