@@ -64,19 +64,19 @@ or download the project directly from [here](https://share.weiyun.com/MrKPfxsF).
 
 A viewer that can load [gltf/glb](https://github.com/KhronosGroup/glTF/blob/master/README.md) file, and supports PBR, skin, morph target, and animation. Most files I have tested are from [sketchfab](https://sketchfab.com/3d-models?features=downloadable&sort_by=-likeCount) and [GeneratedAssets](https://github.com/KhronosGroup/glTF-Asset-Generator), however, in order to keep this repository small, I don't put all of them into the assets folder.
 
-![gltf_model_viewer](https://user-images.githubusercontent.com/34378986/99016175-7ba79d00-2591-11eb-9ebe-6b07d8c0dee4.gif)
+![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer.gif)
 
 ### Shader Toy
 
 A simple [shader toy](https://www.shadertoy.com/) emulator that you can write glsl code to implement cool graphic effects.
 
-![shader_toy](https://user-images.githubusercontent.com/34378986/99018475-21104000-2595-11eb-8091-77cfe782f2ff.gif)
+![shader_toy](https://github.com/czq1989/tow/wiki/images/shader_toy.gif)
 
 ### UI Editor
 
 An editor that is used to edit game UI elements. If you have a [PSD](https://en.wikipedia.org/wiki/Adobe_Photoshop#File_format) file that all UI elements have already been arranged, drop it into the editor, then you can make some changes again or save it as a JSON file.
 
-![ui_editor](https://user-images.githubusercontent.com/34378986/99016271-b4e00d00-2591-11eb-955c-4f37120d06e9.gif)
+![ui_editor](https://github.com/czq1989/tow/wiki/images/ui_editor.gif)
 
 ### Block World Editor
 
