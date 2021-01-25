@@ -56,8 +56,6 @@ But if you are in China and the cloning speed is slow, you can enter the command
 git clone https://gitclone.com/github.com/czq1989/tow.git
 ```
 
-or download the project directly from [here](https://share.weiyun.com/MrKPfxsF).
-
 ## Examples
 
 ### glTF Model Viewer
