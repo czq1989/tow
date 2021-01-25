@@ -1838,6 +1838,7 @@ void UiEditor::updateFileView(Solution::Pane& pane){
     const auto& rootBlock = getCurFileBlock();
     auto& children = rootBlock->getChildren();
 
+
     //---------------------------------------------
     // test triangle whether can be dragged
     static ui::BlockPtr resizingBlock{nullptr};
@@ -1935,7 +1936,20 @@ void UiEditor::updateFileView(Solution::Pane& pane){
     //-------------------
     // scale root block
     if (io.KeyAlt && input.scrolly){
-        auto s = rootBlock->getLayout().scale + vec2(input.scrolly * 0.1f);
+        const auto& rootLayout = rootBlock->getLayout();
+
+        // set new pivot based on mouse position
+        vec2 rootPt = vec2(inverse(rootLayout.srtMat) * vec3(localPos, 1.0f));
+        auto oldPivot = rootLayout.pivot;
+        auto newPivot = rootPt / rootLayout.size;
+        rootBlock->setPivot(newPivot);
+
+        // keep position unchanged
+        vec2 trans = rootLayout.scale * rootLayout.size * (newPivot - oldPivot);
+        rootBlock->translate(rootLayout.translation + trans);
+
+        // scale
+        auto s = rootLayout.scale + vec2(input.scrolly * 0.1f);
         s.x = max(s.x, 0.1f);
         s.y = max(s.y, 0.1f);
         rootBlock->scale(s);
