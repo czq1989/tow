@@ -241,14 +241,14 @@ class Snapshot{
 public:
     struct Record{
         int what{0};
-        std::vector<GLboolean> bv;
-        std::vector<GLint> iv;
-        std::vector<GLfloat> fv;
 
         template<typename T>
         struct Action{
+            Action(){ values.resize(16); }
+
             std::function<void (T* v)> take;
             std::function<void (const T* v)> restore;
+            std::vector<T> values;
         };
 
         Action<GLboolean> actionb;
@@ -288,7 +288,6 @@ tow::ResourcePtr<Snapshot> Snapshot::create() {
 void Snapshot::pushIsEnabled(int what, std::function<void(const GLboolean* v)> f){
     Record rec;
     rec.what = what;
-    rec.bv.resize(16);
     rec.actionb.take = [=](GLboolean* v){glGetBooleanv(what, v);};
     if (f){
         rec.actionb.restore = f;
@@ -301,7 +300,6 @@ void Snapshot::pushIsEnabled(int what, std::function<void(const GLboolean* v)> f
 void Snapshot::push(int what, std::function<void(const GLint* v)> f){
     Record rec;
     rec.what = what;
-    rec.iv.resize(16);
     rec.actioni.take = [=](GLint* v){glGetIntegerv(what, v);};
     rec.actioni.restore = f;
     records.push_back(rec);
@@ -310,7 +308,6 @@ void Snapshot::push(int what, std::function<void(const GLint* v)> f){
 void Snapshot::push(int what, std::function<void(const GLfloat* v)> f){
     Record rec;
     rec.what = what;
-    rec.fv.resize(16);
     rec.actionf.take = [=](GLfloat* v){glGetFloatv(what, v);};
     rec.actionf.restore = f;
     records.push_back(rec);
@@ -319,11 +316,11 @@ void Snapshot::push(int what, std::function<void(const GLfloat* v)> f){
 void Snapshot::take(){
     for(auto& r : records){
         if (r.actionb.take){
-           r.actionb.take(r.bv.data());
+           r.actionb.take(r.actionb.values.data());
         }else if (r.actioni.take){
-           r.actioni.take(r.iv.data());
+           r.actioni.take(r.actioni.values.data());
         }else{
-           r.actionf.take(r.fv.data());
+           r.actionf.take(r.actionf.values.data());
         }
     }
 }
@@ -331,11 +328,11 @@ void Snapshot::take(){
 void Snapshot::restore(){
     for(const auto& r : records){
          if (r.actionb.restore){
-            r.actionb.restore(r.bv.data());
+            r.actionb.restore(r.actionb.values.data());
          }else if (r.actioni.restore){
-            r.actioni.restore(r.iv.data());
+            r.actioni.restore(r.actioni.values.data());
          }else{
-            r.actionf.restore(r.fv.data());
+            r.actionf.restore(r.actionf.values.data());
          }
     }
 }
