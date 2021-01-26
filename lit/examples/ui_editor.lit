@@ -1473,15 +1473,15 @@ public:
     void addDrawCmd(size_t count, const Block::Appearance& app);
 
 private:
-    DynamicArray<Block::Vertex> vertices;
-    DynamicArray<Block::IndexType> indices;
+    std::vector<Block::Vertex> vertices;
+    std::vector<Block::IndexType> indices;
 
     tow::GraphicPipelinePtr pipeline;
     tow::FramebufferPtr defaultFb;
 
     tow::SnapshotPtr snapshot;
 
-    DynamicArray<DrawCommand> drawCmds;
+    std::vector<DrawCommand> drawCmds;
 };
 ---
 
@@ -1583,7 +1583,7 @@ void Renderer::addDrawCmd(size_t count, const Block::Appearance& app){
     strFormat(str, "%s%s%d", app.atlasName.c_str(), app.passName.c_str(), app.mode);
     auto hash = std::hash<std::string>()(str);
 
-    if (drawCmds.nonempty() && drawCmds.back().hash == hash && drawCmds.back().texGroup == app.texGroup){
+    if (!drawCmds.empty() && drawCmds.back().hash == hash && drawCmds.back().texGroup == app.texGroup){
         drawCmds.back().indexCount += count;
     }else{
         drawCmds.push_back({indices.size(), count,
