@@ -140,8 +140,8 @@ public:
         ResManager::IdType id{0};
         std::string filename;
         std::string texName;
-        DynamicArray<Vertex> vertices;
-        DynamicArray<IndexType> indices;
+        std::vector<Vertex> vertices;
+        std::vector<IndexType> indices;
         glm::vec3 minPt{0};
         glm::vec3 maxPt{0};
     };
@@ -935,12 +935,12 @@ private:
     tow::FramebufferPtr defaultFb;
 
     tow::VertexArrayPtr vertexArray;
-    DynamicArray<ResManager::Vertex> vertexBuf;
-    DynamicArray<ResManager::IndexType> indexBuf;
+    std::vector<ResManager::Vertex> vertexBuf;
+    std::vector<ResManager::IndexType> indexBuf;
 
-    DynamicArray<DrawCommand> drawCmds;
-    DynamicArray<DrawCommand> selectedCmds;
-    DynamicArray<CustomRenderFunc> customCmds;
+    std::vector<DrawCommand> drawCmds;
+    std::vector<DrawCommand> selectedCmds;
+    std::vector<CustomRenderFunc> customCmds;
 
     // gbuffer
     tow::FramebufferPtr gbufferFb;
@@ -1085,7 +1085,7 @@ void Renderer::addDrawCmd(const Block* bk){
 
     auto selectedCmd = bk->isSelected();
 
-    if (drawCmds.nonempty() && drawCmds.back().cmdHash == bk->getCmdHash() && !selectedCmd){
+    if (!drawCmds.empty() && drawCmds.back().cmdHash == bk->getCmdHash() && !selectedCmd){
         drawCmds.back().indexCount += count;
     }else{
         drawCmds.push_back({indexBuf.size(), count,
@@ -1420,13 +1420,6 @@ void BlockWorldEditor::showMainView(Solution::Pane& pane){
     PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2, 2));
     BeginPane(pane.name, pane.height, winFlags);
         BeginChild("Main Scene");
-
-            //--------------
-            // camera
-            cam->getPersp().aspectRatio = win.size.y / win.size.x;
-            cam->getOrtho().mag = {win.size.x, win.size.y};
-            manipulateCamera(cam, pane);
-
             //------------------------
             // draw curScene scene
             curScene->draw(cam, renderer);
@@ -1437,6 +1430,14 @@ void BlockWorldEditor::showMainView(Solution::Pane& pane){
             updateSceneView(pane);
             pane.updateInput();
 
+            //--------------
+            // camera
+            cam->getPersp().aspectRatio = win.size.y / win.size.x;
+            cam->getOrtho().mag = {win.size.x, win.size.y};
+            manipulateCamera(cam, pane);
+
+            //-----------------
+            // render
             GetWindowDrawList()->AddCallback([](const ImDrawList* parent_list, const ImDrawCmd* cmd){
                 (void)parent_list;
                 auto editor = (BlockWorldEditor*)(cmd->UserCallbackData);
@@ -1656,7 +1657,7 @@ void BlockWorldEditor::show(){
     static bool openHelpWindow = false;
 
     Begin("Bottom Bar", nullptr, winFlags);
-    SetCursorPos({GetStyle().WindowPadding.x, 15.0f - GetFramedItemSize("Menu").y * 0.5f});
+    SetCursorPos({GetStyle().WindowPadding.x, 15.0f - GetFramedItemSize("Help").y * 0.5f});
     if (Button("Help")){
         openHelpWindow = true;
     }
