@@ -119,19 +119,21 @@ includedirs {
     "externals/psdump/src/parser",
     "externals/psdump/libpsd-0.9/include",
     "externals",
+    "source/tow",
     "source/examples",
     "source/examples/asset_manager",
     "source/examples/ui_editor",
     "source/examples/shader_toy",
     "source/examples/gltf_model_viewer",
     "source/examples/block_world_editor",
-    "source/tow",
+    "source/examples/simple_paint",
 }
 
 -- files
 files {
     "source/tow/tow.cpp",
     "source/tow/tow.h",
+
     "source/tow/call_stack.h",
     "source/examples/*.cpp",
     "source/examples/*.h",
@@ -145,6 +147,10 @@ files {
     "source/examples/ui_editor/*.h",
     "source/examples/block_world_editor/*.cpp",
     "source/examples/block_world_editor/*.h",
+
+    "source/examples/simple_paint/*.cpp",
+    "source/examples/simple_paint/*.h",
+
 }
 filter "system:Windows"
     files "source/tow/call_stack_win32.cpp"

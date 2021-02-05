@@ -4,7 +4,7 @@
 shared_src := ../source/examples
 shared_lit := examples/auxiliary.lit\
               examples/camera.lit\
-              examples/color_pass.lit\
+              examples/post_process.lit\
               examples/coordinate_axis.lit\
               examples/directional_lighting.lit\
               examples/environment_cube.lit\
@@ -66,6 +66,14 @@ block_world_editor_lit := examples/block_world_editor.lit
 $(block_world_editor_src)/dummy.target : $(block_world_editor_lit)
 	../tools/lit -t $? dummy.lit -odir $(block_world_editor_src)
 
+#------------------------------------------------
+# simple paint
+simple_paint_src := ../source/examples/simple_paint
+simple_paint_lit := examples/simple_paint_ver2.lit
+
+$(simple_paint_src)/dummy.target : $(simple_paint_lit)
+	../tools/lit -t $? dummy.lit -odir $(simple_paint_src)
+
 #-----------------------------------------
 # shaders
 shader_src := ../assets/shaders
@@ -79,6 +87,8 @@ $(shader_src)/dummy.target : $(shader_lit)
 # tow
 tow_src := ../source/tow
 tow_lit := tow/draw_functions.lit\
+           tow/buffer.lit\
+           tow/framebuffer.lit\
            tow/pipeline.lit\
            tow/programable_stages.lit\
            tow/shader_variable.lit\
@@ -94,6 +104,7 @@ all: $(shared_src)/dummy.target\
      $(viewer_src)/dummy.target\
      $(ui_editor_src)/dummy.target\
      $(block_world_editor_src)/dummy.target\
+     $(simple_paint_src)/dummy.target\
      $(toy_src)/dummy.target\
      $(toy_shader_src)/dummy.target\
      $(shader_src)/dummy.target\

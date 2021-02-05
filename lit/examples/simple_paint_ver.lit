@@ -1,0 +1,1127 @@
+@s
+
+--- simple_paint.h
+#ifndef SIMPLE_PAINT_H
+#define SIMPLE_PAINT_H
+
+#include "solution.h"
+
+#include "glm.hpp"
+#include "gtx/matrix_transform_2d.hpp"
+
+
+namespace sp{
+@{transformation}
+@{vertex group}
+@{element}
+@{rendering channel}
+@{quad}
+@{layer}
+@{canvas}
+@{brush}
+@{brush renderer}
+@{brush history}
+@{drawing board}
+}
+
+@{simple paint}
+
+#endif
+---
+
+--- simple_paint.cpp
+#include "simple_paint.h"
+
+#include "imgui.h"
+#include "example_util.h"
+
+using namespace glm;
+using namespace ImGui;
+using namespace tow;
+
+namespace sp{
+@{utility functions}
+@{canvas implemention}
+@{brush renderer implemention}
+@{drawing board implemention}
+}
+
+@{simple paint implemention}
+
+---
+
+--- utility functions
+//----------------------------------------------
+// utility functions
+static void renderToTexture(const RenderingChannel& rc,
+                     const std::string& passName,
+                     const Element& element,
+                     const std::vector<TexturePtr>& srcTexs,
+                     const TexturePtr& dstTex,
+                     bool enableBlend = false){
+
+    assert(!element.vg.vertices.empty() && !element.vg.vertices.empty());
+
+    const auto& bufGroup = rc.getBufferGroup();
+    const auto& st = dstTex->getStorage();
+    const auto& prog = rc.getProgram();
+    auto pvmMat = glm::translate(mat3(1.0f), vec2(-1.0f)) *
+                  glm::scale(mat3(1.0f), vec2(2.0f / st.width, 2.0f / st.height)) *
+                  element.tsm.localMat;
+
+    bufGroup->createBuffer("b_vertex", element.vg.vertices.data(),
+        {GL_ARRAY_BUFFER, sizeof(Vertex), element.vg.vertices.size(), GL_DYNAMIC_DRAW});
+
+    bufGroup->createBuffer("b_index", element.vg.indices.data(),
+        {GL_ELEMENT_ARRAY_BUFFER, sizeof(IndexType), element.vg.indices.size(), GL_DYNAMIC_DRAW});
+
+    rc.fb->setSize(st.width, st.height);
+    rc.fb->setAttachmentTexture("f_color", dstTex);
+    rc.fb->bind(st.width, st.height);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glDisable(GL_DEPTH_TEST);
+    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+    if (enableBlend){
+        glEnable(GL_BLEND);
+    }else{
+        glDisable(GL_BLEND);
+    }
+
+    std::string name;
+    for(size_t i = 0; i < srcTexs.size(); ++i){
+        strFormat(name, "s_tex%u", i + 1);
+        prog->setSampler(name, srcTexs[i]);
+    }
+    prog->setUniformf("u_pvmMat", {&pvmMat, 9});
+    prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass", passName);
+
+    drawElements(rc.pp, GL_TRIANGLES);
+
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+}
+
+static void renderToScreen(const RenderingChannel& rc,
+                    const std::string& passName,
+                    const Element& element,
+                    const TexturePtr& srcTex,
+                    const Solution::Pane& pane,
+                    bool enableClear = false){
+
+    assert(!element.vg.vertices.empty() && !element.vg.vertices.empty());
+
+    const auto& prog = rc.getProgram();
+    const auto& window = pane.window;
+    const auto& bufGroup = rc.getBufferGroup();
+    auto pvmMat = glm::translate(mat3(1.0f), vec2(-1.0f)) *
+                  glm::scale(mat3(1.0f), vec2(2.0f / window.width, 2.0f / window.height)) *
+                  glm::translate(mat3(1.0f), vec2(window.width, window.height) * 0.5f) *
+                  element.tsm.localMat;
+
+    bufGroup->createBuffer("b_vertex", element.vg.vertices.data(),
+        {GL_ARRAY_BUFFER, sizeof(Vertex), element.vg.vertices.size(), GL_DYNAMIC_DRAW});
+
+    bufGroup->createBuffer("b_index", element.vg.indices.data(),
+        {GL_ELEMENT_ARRAY_BUFFER, sizeof(IndexType), element.vg.indices.size(), GL_DYNAMIC_DRAW});
+
+    rc.fb->bindRect(window.getRect());
+
+    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    if (enableClear) glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+
+    if (srcTex){
+        prog->setSampler("s_tex1", srcTex);
+    }
+    prog->setUniformf("u_pvmMat", {&pvmMat, 9});
+    prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass", passName);
+
+    drawElements(rc.pp, GL_TRIANGLES);
+
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+}
+---
+
+--- transformation
+//-------------------------
+// transformation
+struct Transformation{
+    glm::vec2 scale{1.0f};
+    float rotation{0.0f};
+    glm::vec2 translation{0.0f};
+    glm::vec2 pivotTranslation{0.0f};
+    glm::mat3 localMat{1.0f};
+
+    void updateLocalMat(){
+        localMat =
+            glm::translate(glm::mat3(1.0f), translation) *
+            glm::rotate(glm::mat3(1.0f), glm::radians(rotation)) *
+            glm::scale(glm::mat3(1.0f), glm::vec2(scale)) *
+            glm::translate(glm::mat3(1.0f), pivotTranslation);
+    }
+};
+---
+
+--- vertex group
+//-------------------------------
+// vertex group
+struct Vertex{
+    glm::vec2 position{0.0f};
+    glm::u8vec4 attachment{0};
+};
+
+using IndexType = GLubyte;
+
+struct VertexGroup{
+    std::vector<Vertex> vertices;
+    std::vector<IndexType> indices;
+
+    void addVertices(const std::vector<Vertex>& vs) {
+        vertices.insert(vertices.end(), vs.begin(), vs.end());
+    }
+    void addIndices(const std::vector<IndexType>& is){
+        indices.insert(indices.end(), is.begin(), is.end());
+    }
+    void clear() { vertices.clear(); indices.clear(); }
+};
+
+inline constexpr IndexType operator "" _i(unsigned long long arg) noexcept{
+    assert(arg <= std::numeric_limits<IndexType>::max());
+    return static_cast<IndexType>(arg);
+}
+---
+
+--- element
+//------------------------
+// element
+struct Element{
+    VertexGroup vg;
+    Transformation tsm;
+};
+---
+
+--- rendering channel
+//------------------------------
+// rendering channel
+struct RenderingChannel{
+    tow::FramebufferPtr fb;
+    tow::GraphicPipelinePtr pp;
+    const auto& getProgram() const { return pp->getProgram(); }
+    const auto& getBufferGroup() const { return pp->getBufferGroup(); }
+};
+---
+
+--- quad
+//------------------
+// quad
+struct Quad{
+    Quad(const glm::ivec2& size, const glm::u8vec4& att){
+        element.vg.addVertices({
+            {glm::vec2(0.0f), att},
+            {glm::vec2(size.x, 0.0f), att},
+            {size, att},
+            {glm::vec2(0.0f, size.y), att}
+        });
+        element.vg.addIndices({0_i, 1_i, 2_i, 2_i, 3_i, 0_i});
+    }
+    Quad(const glm::ivec2& size){
+        element.vg.addVertices({
+            {glm::vec2(0.0f), glm::u8vec4(0)},
+            {glm::vec2(size.x, 0.0f), glm::u8vec4(255, 0, 0, 0)},
+            {size, glm::u8vec4(255, 255, 0, 0)},
+            {glm::vec2(0.0f, size.y), glm::u8vec4(0, 255, 0, 0)}
+        });
+        element.vg.addIndices({0_i, 1_i, 2_i, 2_i, 3_i, 0_i});
+    }
+    Element element;
+};
+---
+
+--- layer
+//-------------------
+// layer
+class Layer;
+using LayerPtr = tow::ResourcePtr<Layer>;
+
+class Layer{
+public:
+    enum BlendMode{
+        Normal = 0,
+        Multiply,
+        SoftLight
+    };
+private:
+    Layer(const std::string& n, const glm::ivec2& size) : name(n), quad(size) {
+        tex = tow::Texture::create2D({GL_TEXTURE_2D, 1, GL_RGBA8, nullptr, size.x, size.y});
+        tex->clear2D(4 * size.x * size.y, {GL_RGBA});
+    }
+
+public:
+    ~Layer(){}
+public:
+    static LayerPtr create(const std::string& n, const glm::ivec2& size){
+        return LayerPtr(new Layer(n, size));
+    }
+
+public:
+    std::string name;
+    tow::TexturePtr tex;
+    Quad quad;
+    Transformation tsm;
+    BlendMode blendMode{BlendMode::Normal};
+    bool visible{true};
+};
+---
+
+--- canvas
+//-----------------------
+// canvas
+class Canvas;
+using CanvasPtr = tow::ResourcePtr<Canvas>;
+
+class Canvas{
+private:
+    Canvas(const std::string& n, const glm::ivec2& size)
+    : name(n), mainQuad(size), compositeQuad(size) {
+        mainTex = tow::Texture::create2D({GL_TEXTURE_2D, 1, GL_RGBA8, nullptr, size.x, size.y});
+        compositeTex = tow::Texture::create2D({GL_TEXTURE_2D, 1, GL_RGBA8, nullptr, size.x, size.y});
+    }
+public:
+    ~Canvas(){}
+public:
+    static CanvasPtr create(const std::string& n, const glm::ivec2& size){
+        return CanvasPtr(new Canvas(n, size));
+    }
+
+public:
+    void renderLayersToTexture(const RenderingChannel& rc);
+
+    const auto& addLayer(const std::string n){
+        const auto& st = mainTex->getStorage();
+        layers.push_back(Layer::create(n, glm::ivec2(st.width, st.height)));
+        return layers.back();
+    }
+    void removeLayer(size_t i){
+        assert(i < layers.size());
+        layers.erase(layers.begin() + i);
+    }
+    const auto& getCurrentLayer() const{
+        return layers.at(curLayerIndex);
+    }
+    auto getSize()const{
+        const auto& st = mainTex->getStorage();
+        return glm::ivec2(st.width, st.height);
+    }
+    auto getWidth() const {
+        return mainTex->getStorage().width;
+    }
+    auto getHeight() const{
+        return mainTex->getStorage().height;
+    }
+
+public:
+    std::string name;
+    tow::TexturePtr mainTex;
+    Quad mainQuad;
+    tow::TexturePtr compositeTex;
+    Quad compositeQuad;
+
+    std::vector<LayerPtr> layers;
+
+    glm::vec3 color{1.0f};
+    size_t curLayerIndex{0};
+};
+---
+
+--- canvas implemention
+//-----------------------
+// canvas implemention
+void Canvas::renderLayersToTexture(const RenderingChannel& rc){
+    const auto& prog = rc.pp->getProgram();
+    prog->setUniformf("u_background", {&color, 3});
+    renderToTexture(rc, "background", compositeQuad.element, {}, compositeTex, false);
+    compositeTex->copyTo(mainTex);
+
+    prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass", "layer");
+
+    for(const auto& layer : layers){
+        if (!layer->visible){ continue; }
+
+        prog->setUniformi("u_blendMode", (int)layer->blendMode);
+
+        renderToTexture(rc, "layer", layer->quad.element,
+            {compositeTex, layer->tex}, mainTex);
+
+        mainTex->copyTo(compositeTex);
+    }
+}
+---
+
+--- brush
+//---------------------
+// brush
+class Brush;
+using BrushPtr = tow::ResourcePtr<Brush>;
+
+class Brush{
+public:
+    struct Parameter{
+        int size{2};
+        float hardness{1.0f};
+        float spacing{0.1f};
+        glm::vec3 color{0.0f};
+        tow::TexturePtr patternTex;
+        std::string passName;
+    };
+    struct Stroke{
+        glm::mat3 mat{1.0f};
+        int num{0};
+    };
+
+private:
+    Brush(const std::string& passName, int size){
+        param.passName = passName;
+        param.size = size;
+    }
+public:
+    ~Brush(){}
+public:
+    static BrushPtr create(const std::string& passName, int size){
+        return BrushPtr(new Brush(passName, size));
+    }
+
+public:
+    auto getUnit() const{
+        return glm::max(1.0f, param.spacing * param.size);
+    }
+
+public:
+    Parameter param;
+};
+---
+
+--- brush renderer
+//---------------------
+// brush renderer
+class BrushRenderer;
+using BrushRendererPtr = tow::ResourcePtr<BrushRenderer>;
+
+class BrushRenderer{
+private:
+    BrushRenderer(const glm::ivec2& size) : quad(size) {
+        strokeTex = tow::Texture::create2D({GL_TEXTURE_2D, 1, GL_RGBA8, nullptr, size.x, size.y});
+        strokeTex->clear2D(4 * size.x * size.y, {GL_RGBA});
+
+        layerTex = tow::Texture::create2D({GL_TEXTURE_2D, 1, GL_RGBA8, nullptr, size.x, size.y});
+    }
+public:
+    ~BrushRenderer(){}
+public:
+    static BrushRendererPtr create(const glm::ivec2& size){
+        return BrushRendererPtr(new BrushRenderer(size));
+    }
+
+public:
+    void update(const BrushPtr& brush, const LayerPtr& layer,
+        const Solution::Pane& pane, const glm::vec2& localPos);
+
+    void render(const RenderingChannel& rc, const BrushPtr& brush,
+        const LayerPtr& layer);
+
+    void renderBrushToTexture(const RenderingChannel&rc,
+        const Brush::Parameter& param, const Brush::Stroke& stroke,
+        const LayerPtr& layer);
+
+public:
+    std::vector<Brush::Stroke> strokes;
+    std::vector<Brush::Stroke> historyStrokes;
+    Quad quad;
+    tow::TexturePtr strokeTex;
+    tow::TexturePtr layerTex;
+
+    bool mousePressing{false};
+    glm::vec2 lastLocalPos{0.0f};
+};
+---
+
+--- brush renderer implemention
+//-------------------------------------
+// brush renderer implemention
+void BrushRenderer::update(const BrushPtr& brush, const LayerPtr& layer,
+    const Solution::Pane& pane, const glm::vec2& localPos){
+
+    const auto& input = pane.input;
+    if (input.isMouseClicked[0]){
+        Brush::Stroke bs;
+        bs.mat = mat3(vec3(1, 0, 0), vec3(0, 1, 0), vec3(-localPos, 1));
+        bs.num = 1;
+        strokes.push_back(bs);
+        historyStrokes.push_back(bs);
+
+        layer->tex->copyTo(layerTex);
+
+        lastLocalPos = localPos;
+        mousePressing = true;
+    }
+    if (mousePressing){
+        auto dir = localPos - lastLocalPos;
+        auto len = length(dir);
+        Brush::Stroke bs;
+
+        bs.num = (int)floor(len / brush->getUnit());
+
+        if (bs.num){
+            auto U = vec3(dir / len, 0);
+            auto V = vec3(U.y, -U.x, 0);
+            auto pos = lastLocalPos + vec2(U * brush->getUnit());
+
+            lastLocalPos += vec2(U * brush->getUnit() * (float)(bs.num));
+
+            if (bs.num == 1){
+                bs.mat = mat3(vec3(1, 0, 0), vec3(0, 1, 0), vec3(-pos, 1));
+            }else if (bs.num > 1){
+                bs.mat = inverse(mat3(U, V, vec3(pos , 1)));
+            }
+
+            strokes.push_back(bs);
+            historyStrokes.push_back(bs);
+        }
+    }
+    if (input.isMouseReleased[0]){
+        mousePressing = false;
+    }
+}
+
+void BrushRenderer::render(const RenderingChannel& rc, const BrushPtr& brush,
+    const LayerPtr& layer){
+
+    for(const auto& stroke : strokes){
+        renderBrushToTexture(rc, brush->param, stroke, layer);
+    }
+    strokes.clear();
+}
+
+void BrushRenderer::renderBrushToTexture(const RenderingChannel&rc,
+    const Brush::Parameter& param, const Brush::Stroke& stroke,
+    const LayerPtr& layer){
+
+    const auto& prog = rc.pp->getProgram();
+    prog->setUniformf("u_brushSize", (float)glm::max(param.size, 2));
+    prog->setUniformf("u_brushHardness", param.hardness);
+    prog->setUniformf("u_brushColor", {&param.color, 3});
+    prog->setUniformf("u_brushSpacing", glm::max(param.spacing, 0.1f));
+    prog->setUniformi("u_brushNum", stroke.num);
+    prog->setUniformf("u_brushMat", {&stroke.mat, 9});
+
+    const auto& st = strokeTex->getStorage();
+    strokeTex->clear2D(4 * st.width * st.height, {GL_RGBA});
+    renderToTexture(rc, param.passName, quad.element, {}, strokeTex, true);
+    renderToTexture(rc, "textured", quad.element, {strokeTex}, layer->tex, true);
+}
+---
+
+--- brush history
+//--------------------
+// brush history
+class BrushHistory;
+using BrushHistoryPtr = tow::ResourcePtr<BrushHistory>;
+
+class BrushHistory{
+public:
+    const size_t kMaxNumHistories = 20;
+
+    enum class ActionType{
+        UNDO = 0,
+        REDO
+    };
+
+    struct Action{
+        Action(const Brush::Parameter& param,
+            const RenderingChannel& rc,
+            const BrushRendererPtr& br,
+            const LayerPtr& layer,
+            const std::vector<Brush::Stroke>& strokes){
+
+            actParam = param;
+            actRC = rc;
+            actLayer = layer;
+            actStrokes = strokes;
+            actBR = br;
+
+            const auto& st = br->layerTex->getStorage();
+            actLayerTex = tow::Texture::create2D({GL_TEXTURE_2D, 1, GL_RGBA8, nullptr, st.width, st.height});
+            br->layerTex->copyTo(actLayerTex);
+        }
+        void doAct(){
+            for(const auto& stroke : actStrokes){
+                actBR->renderBrushToTexture(actRC, actParam, stroke, actLayer);
+            }
+        }
+        void undoAct(){
+            actLayerTex->copyTo(actLayer->tex);
+        }
+
+        Brush::Parameter actParam;
+        RenderingChannel actRC;
+        LayerPtr actLayer;
+        tow::TexturePtr actLayerTex;
+        std::vector<Brush::Stroke> actStrokes;
+        BrushRendererPtr actBR;
+    };
+
+private:
+    BrushHistory(){}
+public:
+    ~BrushHistory(){}
+public:
+    static BrushHistoryPtr create(){
+        return BrushHistoryPtr(new BrushHistory());
+    }
+
+public:
+    void commit(const Action& act){
+        auto num = actions.size() - curIndex;
+        for(size_t i = 0; i < num; ++i){
+            actions.pop_back();
+        }
+        if (actions.size() >= kMaxNumHistories){
+            actions.erase(actions.begin());
+        }
+
+        actions.push_back(act);
+        curIndex = actions.size();
+        curRenderingIndex = actions.size();
+    }
+
+    void execute(ActionType type){
+        if (type == ActionType::UNDO){
+            if (curIndex > 0 && curIndex <= actions.size()){
+                actions.at(curIndex - 1).undoAct();
+                curIndex -= 1;
+            }
+        }else if (type == ActionType::REDO){
+            if (curIndex + 1 <= actions.size()){
+                curRenderingIndex = curIndex;
+                curIndex += 1;
+            }
+        }
+    }
+
+    void render(){
+        if(curRenderingIndex < actions.size()){
+            actions.at(curRenderingIndex).doAct();
+            curRenderingIndex = actions.size();
+        }
+    }
+private:
+    std::vector<Action> actions;
+    size_t curIndex{0};
+    size_t curRenderingIndex{0};
+};
+---
+
+
+--- drawing board
+//----------------------
+// drawing board
+class DrawingBoard;
+using DrawingBoardPtr = tow::ResourcePtr<DrawingBoard>;
+
+class DrawingBoard{
+private:
+    DrawingBoard(const glm::ivec2& size);
+public:
+    ~DrawingBoard(){}
+public:
+    static DrawingBoardPtr create(const glm::ivec2& size){
+        return DrawingBoardPtr(new DrawingBoard(size));
+    }
+
+public:
+    void update(const Solution::Pane& pane);
+    void render(const Solution::Pane& pane);
+
+public:
+    void createLayer(const std::string& name);
+
+public:
+    glm::vec2 getMouseLocalPos(const Quad& quad, const Solution::Pane& pane);
+
+private:
+    tow::FramebufferPtr fb;
+    tow::FramebufferPtr defaultFb;
+    tow::GraphicPipelinePtr pipeline;
+
+public://todo
+    CanvasPtr canvas;
+    BrushPtr brush;
+    BrushRendererPtr brushRenderer;
+    BrushHistoryPtr brushHistory;
+};
+
+---
+
+--- drawing board implemention
+DrawingBoard::DrawingBoard(const glm::ivec2& size){
+    //-----------------------
+    // framebuffers
+    fb = Framebuffer::create(size.x, size.y);
+    fb->addAttachment("f_color", {GL_RGBA8});
+
+    defaultFb = Framebuffer::create();
+
+    //----------------------
+    // canvas
+    canvas = Canvas::create("sample", size);
+    canvas->mainQuad.element.tsm.pivotTranslation = -vec2(size) * 0.5f - vec2(125, 0);
+    canvas->mainQuad.element.tsm.updateLocalMat();
+    canvas->addLayer("default");
+
+    //-----------------
+    // brush
+    brush = Brush::create("circleBrush", 150);
+    brush->param.color = vec3(0, 0, 0);
+    brush->param.spacing = 0.1f;
+    brush->param.hardness = 0.1f;
+
+    brushRenderer = BrushRenderer::create(size);
+
+    brushHistory = BrushHistory::create();
+
+    //------------------
+    // create pipeline
+    auto bufGroup = BufferGroup::create();
+    bufGroup->createBuffer("b_vertex", nullptr, {GL_ARRAY_BUFFER, sizeof(Vertex), 1, GL_DYNAMIC_DRAW});
+    bufGroup->createBuffer("b_index", nullptr, {GL_ELEMENT_ARRAY_BUFFER, sizeof(IndexType), 1, GL_DYNAMIC_DRAW});
+
+    auto layout = VertexLayout::create();
+    layout->add("a_position", {GL_FLOAT, 2, false, offsetof(Vertex, position)});
+    layout->add("a_attachment", {GL_UNSIGNED_BYTE, 4, true, offsetof(Vertex, attachment)});
+    layout->stride(sizeof(Vertex));
+
+    pipeline = GraphicPipeline::create({bufGroup, "b_vertex", "b_index"}, layout,
+        {"assets/shaders/simple_paint.vert", "assets/shaders/simple_paint.frag"});
+
+}
+
+glm::vec2 DrawingBoard::getMouseLocalPos(const Quad& quad, const Solution::Pane& pane){
+    const auto& win = pane.window;
+    const auto& input = pane.input;
+    glm::vec2 globalPos(input.x - win.x - win.width * 0.5f, input.y - win.y - win.height * 0.5f);
+    return glm::vec2(inverse(quad.element.tsm.localMat) * glm::vec3(globalPos, 1.0f));
+}
+
+void DrawingBoard::update(const Solution::Pane& pane){
+    brushRenderer->update(brush, canvas->getCurrentLayer(), pane,
+        getMouseLocalPos(canvas->mainQuad, pane));
+
+    if (pane.input.isMouseReleased[0]){
+        if (!brushRenderer->historyStrokes.empty()){
+            brushHistory->commit({
+                brush->param, {fb, pipeline}, brushRenderer,
+                canvas->getCurrentLayer(), brushRenderer->historyStrokes});
+
+            brushRenderer->historyStrokes.clear();
+        }
+    }
+}
+
+void DrawingBoard::render(const Solution::Pane& pane){
+    const auto& curLayer = canvas->getCurrentLayer();
+
+    RenderingChannel rc{fb, pipeline};
+
+    brushRenderer->render(rc, brush, curLayer);
+    brushHistory->render();
+
+    canvas->renderLayersToTexture({fb, pipeline});
+    renderToScreen({defaultFb, pipeline}, "textured", canvas->mainQuad.element,
+        canvas->mainTex, pane, true);
+}
+
+---
+
+
+--- simple paint
+//-----------------------------------
+// simple paint
+class SimplePaint : public Solution::Project{
+public:
+    SimplePaint(const std::string& n) : Project(n) {}
+
+public:
+    void setup() override;
+    void show(size_t cIndex, size_t pIndex) override;
+    void show() override;
+    void exit() override;
+
+private:
+    void updateMainView(Solution::Pane& pane);
+    void showMainView(Solution::Pane& pane);
+    void showLayers(const ImVec2& rtPos, Solution::Pane& pane);
+    void showSetting(const ImVec2& rtPos, Solution::Pane& pane);
+    void showBottomBar();
+    void showBrushSetting();
+
+private:
+    sp::DrawingBoardPtr board;
+    bool firstEntry{true};
+};
+---
+
+--- simple paint implemention
+//---------------------------------
+// simple paint implemention
+void SimplePaint::setup(){
+    projLayout.setColumns({
+        {"Column1", 1.0f, {{"Main View", 1.0f}}},
+    });
+    projLayout.setContraction({0, 0, 0, 30.0f});
+
+    board = sp::DrawingBoard::create(ivec2(910, 512));
+
+    firstEntry = true;
+}
+
+void SimplePaint::updateMainView(Solution::Pane& pane){
+    const auto& window = pane.window;
+    const auto& input = pane.input;
+    auto& io = GetIO();
+    auto& canvas = board->canvas;
+    auto& tsm = canvas->mainQuad.element.tsm;
+
+    vec2 origin{window.x, window.y};
+    vec2 mousePos{input.x - window.width * 0.5f, input.y - window.height * 0.5f};
+    vec2 deltaPos{input.dx, -input.dy};
+    vec2 globalPos = mousePos - origin;
+
+    if (IsKeyReleased(GLFW_KEY_Z)){
+        board->brushHistory->execute(sp::BrushHistory::ActionType::UNDO);
+    }
+    if (IsKeyReleased(GLFW_KEY_R)){
+        board->brushHistory->execute(sp::BrushHistory::ActionType::REDO);
+    }
+    if (IsKeyReleased(GLFW_KEY_A)){
+        std::string name;
+        strFormat(name, "layer_%u", canvas->layers.size());
+        canvas->addLayer(name);
+        canvas->curLayerIndex = canvas->layers.size() - 1;
+    }
+    if (input.isMouseClicked[0] || input.isMouseClicked[1]){
+        firstEntry = false;
+    }
+
+    if (!window.focused){
+        if (!firstEntry){
+            return;
+        }
+    }else{
+        firstEntry = false;
+    }
+
+    if (!IsKeyDown(GLFW_KEY_SPACE) && !io.KeyAlt){
+        board->update(pane);
+    }
+
+    if (IsKeyDown(GLFW_KEY_SPACE) && input.isMouseDown[0]){
+        tsm.translation += deltaPos;
+        tsm.updateLocalMat();
+        board->brushRenderer->lastLocalPos = board->getMouseLocalPos(
+            canvas->mainQuad, pane);
+        board->brushRenderer->mousePressing = false;
+    }
+
+    if (io.KeyAlt && input.scrolly){
+        auto s = tsm.scale + vec2(input.scrolly * 0.1f);
+        s.x = max(s.x, 0.1f);
+        s.y = max(s.y, 0.1f);
+        tsm.scale = s;
+        tsm.updateLocalMat();
+
+        //--------------------------------------------------------------
+        // set the new pivot, and keep the pivot position unchanged
+        vec3 pivotLocalPos(0.0f, 0.0f, 1.0f);
+        vec2 newPivotTrans = -vec2(inverse(tsm.localMat) * vec3(globalPos, 1.0f));
+
+        sp::Transformation newTsm;
+        newTsm.scale = tsm.scale;
+        newTsm.rotation = tsm.rotation;
+        newTsm.pivotTranslation = newPivotTrans;
+        newTsm.updateLocalMat();
+
+        tsm.translation = vec2(tsm.localMat * pivotLocalPos - newTsm.localMat * pivotLocalPos);
+        tsm.pivotTranslation = newPivotTrans;
+        tsm.updateLocalMat();
+    }
+
+
+}
+
+void SimplePaint::showMainView(Solution::Pane& pane){
+    auto winFlags = ImGuiWindowFlags_NoTitleBar;
+    ImVec2 rtPos;
+
+    PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2, 2));
+
+    BeginPane(pane.name, pane.height, winFlags);
+    BeginChild("Main View Child");
+        rtPos = GetWindowPos() + ImVec2{GetWindowWidth(), 0};
+
+        //-------------
+        // update
+        pane.updateWindow();
+        updateMainView(pane);
+        pane.updateInput();
+
+        //-----------------
+        // render
+        GetWindowDrawList()->AddCallback([](const ImDrawList* parent_list, const ImDrawCmd* cmd){
+            (void)parent_list;
+            auto ptr = (SimplePaint*)(cmd->UserCallbackData);
+            ptr->board->render(ptr->projLayout.getPane(0, 0));
+        }, this);
+        GetWindowDrawList()->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+
+    EndChild();
+    EndPane();
+
+    PopStyleVar();
+
+    //--------------------
+    // show panels
+    showLayers(rtPos, pane);
+    showSetting(rtPos + ImVec2(0, 250.0f + GetStyle().ItemSpacing.y), pane);
+
+
+    //---------------------------
+    // show right button menu
+    if (pane.input.isMouseClicked[1]){
+        OpenPopup("Block Menu");
+    }
+    if (BeginPopup("Block Menu")){
+        SetWidgetWidth(165);
+        SetLabelWidth(70);
+
+        showBrushSetting();
+
+        if (IsKeyDown(GLFW_KEY_ESCAPE)){
+            CloseCurrentPopup();
+        }
+
+        EndPopup();
+    }
+}
+
+void SimplePaint::showBrushSetting(){
+    Text("Brush");
+    WidgetWithLeftLabel("Size", [&]{
+        DragInt("", &board->brush->param.size, 1.0f, 2, 500);
+    });
+    WidgetWithLeftLabel("Spacing", [&]{
+        DragFloat("", &board->brush->param.spacing, 0.01f, 0.1f, 1.0f);
+    });
+    WidgetWithLeftLabel("Hardness", [&]{
+        DragFloat("", &board->brush->param.hardness, 0.01f, 0.0f, 1.0f);
+    });
+    WidgetWithLeftLabel("Color", [&]{
+        ColorEdit3("##1", &board->brush->param.color.x);
+    });
+}
+
+void SimplePaint::show(size_t cIndex, size_t pIndex){
+    showMainView(projLayout.getPane(cIndex, pIndex));
+}
+
+void SimplePaint::showSetting(const ImVec2& rtPos, Solution::Pane& pane){
+    auto& window = pane.window;
+    auto winFlags = 0;
+
+    static ImVec2 localPos;
+    SetNextWindowPos(rtPos + localPos, window.sizeChanged ? ImGuiCond_Always : ImGuiCond_Once, {1, 0});
+    SetNextWindowSize({250.0f, 300.0f}, ImGuiCond_Once);
+
+    if (Begin("Setting##SimplePaint", nullptr, winFlags)){
+        localPos = GetWindowPos() + ImVec2(GetWindowWidth(), 0) - rtPos;
+
+        const float kWidgetWidth = 165;
+        SetWidgetWidth(kWidgetWidth);
+        SetLabelWidth(70);
+
+        showBrushSetting();
+
+        Separator();
+        Text("Canvas");
+        WidgetWithLeftLabel("Color", [&]{
+            ColorEdit3("##2", &board->canvas->color.x);
+        });
+        Text("Size: %dx%d", board->canvas->getWidth(), board->canvas->getHeight());
+        Text("Scale: %.1f", board->canvas->mainQuad.element.tsm.scale.x);
+    }
+    End();
+}
+
+void SimplePaint::showLayers(const ImVec2& rtPos, Solution::Pane& pane){
+    auto& window = pane.window;
+    auto winFlags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    auto& io = GetIO();
+    auto lastCfg = io.ConfigWindowsResizeFromEdges;
+
+    static ImVec2 localPos;
+
+    SetNextWindowPos(rtPos + localPos, window.sizeChanged ? ImGuiCond_Always : ImGuiCond_Once, {1, 0});
+    SetNextWindowSize(ImVec2(250.0f, 250.0f), ImGuiCond_Once);
+
+    io.ConfigWindowsResizeFromEdges = false;
+
+    if (Begin("Layers##SimplePaint", nullptr, winFlags)){
+        localPos = GetWindowPos() + ImVec2(GetWindowWidth(), 0) - rtPos;
+
+        //-----------------------
+        // blend mode
+        AlignTextToFramePadding();
+        Text("Mode"); SameLine();
+        SetNextItemWidth(120);
+        const char* modeNames[] = {
+            "Normal", "Multiply", "SoftLight"
+        };
+        const auto& curLayer = board->canvas->getCurrentLayer();
+
+        if (BeginCombo("##Mode", modeNames[(int)curLayer->blendMode])){
+            for(int i = 0; i < 3; ++i){
+                if (Selectable(modeNames[i]) && board->canvas->curLayerIndex > 0){
+                    curLayer->blendMode = (sp::Layer::BlendMode)i;
+                }
+            }
+            EndCombo();
+        }
+
+        //----------------------
+        // layer list view
+        PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2.0f, 2.0f));
+        BeginChild("Layer List", {0, GetContentRegionAvail().y - 15});
+        {
+            ImVec4 btnColor;
+            std::string btnStr;
+            ImVec4 inputTextColor;
+            size_t index{0};
+            static sp::LayerPtr visAloneLayer;
+
+            auto& layers = board->canvas->layers;
+
+            for(auto rIter = layers.rbegin(); rIter != layers.rend(); ++rIter, ++index){
+                auto& layer = (*rIter);
+                auto layerIndex = layers.size() - index - 1;
+
+                btnColor = GetStyle().Colors[ImGuiCol_Button];
+                if(layerIndex == board->canvas->curLayerIndex) {
+                    btnColor = ImVec4(0.24f, 0.45f, 0.6f, 1.0f);
+                }
+
+                PushStyleColor(ImGuiCol_Button, btnColor);
+                PushStyleColor(ImGuiCol_ButtonHovered, btnColor);
+                PushStyleColor(ImGuiCol_ButtonActive, btnColor);
+                BeginGroup();
+                    // visible button
+                    strFormat(btnStr, "%s##%u", layer->visible ? ICON_FA_EYE : ICON_FA_EYE_SLASH, index);
+                    if (Button(btnStr.c_str())) {
+                        if (io.KeyAlt){
+                            layer->visible = true;
+                            for(const auto& l : layers){
+                                if (l != layer) { l->visible = (visAloneLayer == layer); }
+                            }
+                            visAloneLayer = visAloneLayer == layer ? nullptr : layer;
+                        }else{
+                            layer->visible = !layer->visible;
+                        }
+                    }
+
+                    // layer name
+                    SameLine();
+                    BeginGroup();
+                        PushStyleColor(ImGuiCol_FrameBg, btnColor);
+                        PushStyleColor(ImGuiCol_FrameBgHovered, btnColor);
+                        PushStyleColor(ImGuiCol_FrameBgActive, btnColor);
+                        auto textSize = CalcTextSize(layer->name.c_str());
+                        auto itemSize = GetStyle().FramePadding * 2.0f + textSize;
+
+                        SetNextItemWidth(GetWindowContentRegionWidth() * 0.5f);
+
+                        Button(layer->name.c_str());
+
+                        SameLine();
+
+                        //PushID(bk->getId());
+                        auto p = GetCursorPos();
+                        p.x = p.x - 2.0f - GetStyle().FrameRounding;
+                        SetCursorPos(p);
+                        Button("", {GetWindowContentRegionWidth() - p.x, GetItemRectSize().y});
+                        //PopID();
+                        PopStyleColor(3);
+                    EndGroup();
+                    if (IsItemClicked(0)){
+                        board->canvas->curLayerIndex = layers.size() - index - 1;
+                    }
+                EndGroup();
+                PopStyleColor(3);
+            }
+        }
+        EndChild();
+        PopStyleVar();
+    }
+    End();
+
+    io.ConfigWindowsResizeFromEdges = lastCfg;
+}
+
+void SimplePaint::showBottomBar(){
+    auto& io = GetIO();
+    auto winFlags = ImGuiWindowFlags_NoTitleBar |
+                    ImGuiWindowFlags_NoResize |
+                    ImGuiWindowFlags_NoBringToFrontOnFocus |
+                    ImGuiWindowFlags_NoScrollbar;
+
+    auto winSize = io.DisplayFramebufferScale * io.DisplaySize;
+    SetNextWindowPos({0, winSize.y - 30.0f});
+    SetNextWindowSize({winSize.x, 30.0f});
+
+    static bool openHelpWindow = false;
+
+    Begin("Bottom Bar", nullptr, winFlags);
+    SetCursorPos({GetStyle().WindowPadding.x, 15.0f - GetFramedItemSize("Help").y * 0.5f});
+    if (Button("Help")){
+        openHelpWindow = true;
+    }
+    SameLine();
+    Text("Draw Calls: %u, FPS: %.1f, Blocks: %u",
+        0, io.Framerate, 0);
+    End();
+
+    if (openHelpWindow){
+        winFlags = 0;
+        auto fbSize = io.DisplayFramebufferScale * io.DisplaySize;
+        SetNextWindowPos(fbSize * 0.5f, ImGuiCond_Once, {0.5f, 0.5f});
+        SetNextWindowSize({460, 400}, ImGuiCond_Once);
+        if (Begin("Help", &openHelpWindow, winFlags)){
+            Text("Shortcut Keys");
+            BulletText("Create new layer - A");
+            BulletText("Undo - Z");
+            BulletText("Redo - R");
+            BulletText("Move view - SPACE+LEFT BUTTON");
+            BulletText("Scale view - ALT+MIDDLE BUTTON");
+        }
+        End();
+        firstEntry = !openHelpWindow;
+        board->brushRenderer->mousePressing = false;
+    }
+}
+
+void SimplePaint::show(){
+    showBottomBar();
+}
+
+void SimplePaint::exit(){
+
+}
+---

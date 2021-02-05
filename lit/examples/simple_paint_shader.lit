@@ -1,0 +1,154 @@
+@s
+
+--- simple_paint.vert
+#version 430 core
+
+in vec2 a_position;
+in vec4 a_attachment;
+
+uniform mat3 u_pvmMat;
+
+out vec4 v_attachment;
+
+void main(){
+    gl_Position = vec4(u_pvmMat * vec3(a_position, 1), 1);
+
+    v_attachment = a_attachment;
+}
+---
+
+--- simple_paint.frag
+#version 430 core
+
+in vec4 v_attachment;
+
+uniform sampler2D s_tex1;
+uniform sampler2D s_tex2;
+
+uniform vec3 u_background;
+
+//-----------------------
+// brush
+uniform vec3 u_brushColor;
+uniform float u_brushSize;
+uniform float u_brushHardness;
+uniform float u_brushSpacing;
+uniform int u_brushNum;
+uniform mat3 u_brushMat;
+const float radius = u_brushSize * 0.5;
+const float unit = max(1.0, u_brushSpacing * u_brushSize);
+
+//-------------------------
+// layer blend mode
+#define NORMAL     0
+#define MULTIPLY   1
+#define SOFT_LIGHT     2
+uniform int u_blendMode;
+
+out vec4 f_color;
+
+subroutine void RenderPass();
+subroutine uniform RenderPass u_pass;
+
+subroutine(RenderPass)
+void color(){
+    f_color = v_attachment;
+}
+
+subroutine(RenderPass)
+void background(){
+    f_color = vec4(u_background, 1);
+}
+
+subroutine(RenderPass)
+void textured(){
+    f_color = texture(s_tex1, v_attachment.xy);
+}
+
+//-----------------------------
+// layer blending
+float softLight( float s, float d ){
+    return (s < 0.5) ? d - (1.0 - 2.0 * s) * d * (1.0 - d)
+        : (d < 0.25) ? d + (2.0 * s - 1.0) * d * ((16.0 * d - 12.0) * d + 3.0)
+                     : d + (2.0 * s - 1.0) * (sqrt(d) - d);
+}
+
+subroutine(RenderPass)
+void layer(){
+    int mode = u_blendMode;
+    vec4 d = texture(s_tex1, v_attachment.xy);
+    vec4 s = texture(s_tex2, v_attachment.xy);
+
+    if (all(equal(s, vec4(0)))){
+        // switch to normal mode if it is a empty layer
+        mode = NORMAL;
+    }
+
+    // revert colors
+    if (s.a > 0) s.rgb = s.rgb / s.a;
+    if (d.a > 0) d.rgb = d.rgb / d.a;
+
+    if (mode == MULTIPLY){
+        s.rgb = s.rgb * d.rgb;
+    }else if (mode == SOFT_LIGHT){
+        s.r = softLight(s.r, d.r);
+        s.g = softLight(s.g, d.g);
+        s.b = softLight(s.b, d.b);
+    }
+
+    // premultiply alpha
+    s.rgb *= s.a;
+    d.rgb *= d.a;
+
+    // blend colors manually, see the website below for detail
+    // https://stackoverflow.com/questions/24346585/opengl-render-to-texture-with-partial-transparancy-translucency-and-then-rende
+    f_color.rgb = s.rgb * 1.0 + d.rgb * (1.0 - s.a);
+    f_color.a = s.a * (1.0 - d.a) + d.a * 1.0;
+}
+
+float drawCircle(vec2 p, vec2 c){
+    float edge1 = max(0.0, radius - 1.0) * u_brushHardness;
+    float edge2 = radius;
+    return 1.0 - smoothstep(edge1, edge2, distance(p, c));
+}
+
+float drawCircleBrush(){
+    vec2 p = vec2(u_brushMat * vec3(gl_FragCoord.xy, 1));
+    int n = u_brushNum - 1;
+
+    if (p.x < -radius || p.x > n * unit + radius){
+        return 0;
+    }
+
+    float w = 0;
+    float w1, w2;
+    for(int i = 0; i <= n; i += 2){
+        w1 = drawCircle(p, vec2(i * unit, 0));
+        if (i + 1 <= n){
+            w2 = drawCircle(p, vec2((i + 1) * unit, 0));
+        }else{
+            w2 = 0;
+        }
+        w = mix(mix(w, 1, w1), 1, w2);
+    }
+
+    return min(1, w);
+}
+
+subroutine(RenderPass)
+void circleBrush(){
+    float a = drawCircleBrush();
+
+    f_color = vec4(u_brushColor * a, a);
+}
+
+subroutine(RenderPass)
+void test(){
+    f_color = vec4(u_brushColor * u_brushHardness, drawCircleBrush());
+    vec3 bg = texelFetch(s_tex1, ivec2(gl_FragCoord.xy), 0).rgb;
+}
+
+void main(){
+    u_pass();
+}
+---

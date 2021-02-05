@@ -13,7 +13,7 @@
 #include "shader_toy.h"
 #include "ui_editor.h"
 #include "block_world_editor.h"
-#include "solution.h"
+#include "simple_paint.h"
 
 int main(){
     //---------------------
@@ -55,7 +55,8 @@ int main(){
     sln->add<ShaderToy>("Shader Toy");
     sln->add<UiEditor>("UI Editor");
     sln->add<BlockWorldEditor>("Block World Editor");
-    sln->start(0);
+    sln->add<SimplePaint>("Simple Paint");
+    sln->start(4);
 
     // enable gl debug
     tow::enableDebugMessageOutput();
