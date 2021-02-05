@@ -1,0 +1,86 @@
+@s
+
+--- post_process.h
+#ifndef POST_PROCESS_H
+#define POST_PROCESS_H
+
+#include "tow.h"
+
+class PostProcess;
+using PostProcessPtr = tow::ResourcePtr<PostProcess>;
+
+class PostProcess{
+private:
+    PostProcess(){}
+
+public:
+    static PostProcessPtr create();
+    static PostProcessPtr create(const std::vector<tow::Shader>& shaders);
+
+public:
+    void draw(tow::TexGroupPtr texGroup, const std::string& name);
+    void draw(const std::string& name, const tow::TexturePtr& tex);
+    void draw();
+
+public:
+    const auto& getPipeline() const { return pipeline; }
+    const auto& getProgram() const { return pipeline->getProgram(); }
+
+private:
+    tow::GraphicPipelinePtr pipeline;
+};
+
+#endif
+---
+
+--- post_process.cpp
+#include "post_process.h"
+
+#include "glm.hpp"
+
+using namespace glm;
+
+PostProcessPtr PostProcess::create(){
+    return PostProcess::create({
+        "assets/shaders/post_process.vert",
+        "assets/shaders/post_process.frag"
+    });
+}
+
+PostProcessPtr PostProcess::create(const std::vector<tow::Shader>& shaders){
+    auto ptr = new PostProcess();
+
+    auto layout = tow::VertexLayout::create();
+    layout->add("a_position", {GL_FLOAT, 2, false});
+
+    vec2 vertices[] = {
+        {-1, -1}, {1, -1}, {1, 1}, {-1, 1}
+    };
+
+    GLubyte indices[] = {
+        0, 1, 2, 2, 3, 0
+    };
+
+    auto bufGroup = tow::BufferGroup::create();
+    bufGroup->createBuffer("b_vertex", vertices, {GL_ARRAY_BUFFER, sizeof(vec2), 4, GL_STATIC_DRAW});
+    bufGroup->createBuffer("b_index", indices, {GL_ELEMENT_ARRAY_BUFFER, sizeof(GLubyte), 6, GL_STATIC_DRAW});
+
+    ptr->pipeline = tow::GraphicPipeline::create({bufGroup, "b_vertex", "b_index"}, layout, shaders);
+
+    return PostProcessPtr(ptr);
+}
+
+void PostProcess::draw(const std::string& name, const tow::TexturePtr& tex){
+    pipeline->getProgram()->setSampler(name, tex);
+    tow::drawElements(pipeline, GL_TRIANGLES);
+}
+
+void PostProcess::draw(tow::TexGroupPtr texGroup, const std::string& name){
+    pipeline->getProgram()->setSampler(texGroup, name);
+    tow::drawElements(pipeline, GL_TRIANGLES);
+}
+
+void PostProcess::draw(){
+    tow::drawElements(pipeline, GL_TRIANGLES);
+}
+---

@@ -734,13 +734,8 @@ void SubroutineSender::check(Program* prog){
 //----------------------
 // sampler sender
 class SamplerSender{
-    struct Texture{
-        TexGroupPtr texGroup;
-        std::string texName;
-    };
-
 public:
-    void setSampler(const std::string& uniformName, const Texture& texture);
+    void setSampler(const std::string& uniformName, const TexturePtr& tex);
     void erase(const std::string& name) { textureMap.erase(name); }
     void clear() { textureMap.clear(); }
 
@@ -748,7 +743,7 @@ public:
     void check(Program* prog);
 
 private:
-    std::unordered_map<std::string, Texture> textureMap;
+    std::unordered_map<std::string, TexturePtr> textureMap;
     std::map<std::string, int> unitMap;
 };
 ---
@@ -756,8 +751,8 @@ private:
 --- sampler sender implemention
 //----------------------------------
 // sampler sender implemention
-void SamplerSender::setSampler(const std::string& uniformName, const SamplerSender::Texture& texture){
-    textureMap[uniformName] = texture;
+void SamplerSender::setSampler(const std::string& uniformName, const TexturePtr& tex){
+    textureMap[uniformName] = tex;
 }
 
 void SamplerSender::send(Program* prog){
@@ -782,14 +777,12 @@ void SamplerSender::send(Program* prog){
             prog->getShaderTag().c_str());
 
         auto unit = it->second;
-
-        const auto& texName = pr.second.texName;
-        auto texGroup = pr.second.texGroup;
-        const auto& st = texGroup->getStorage(texName);
+        const auto& tex = pr.second;
+        const auto& st = tex->getStorage();
 
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindSampler(unit, st.sampler->getHandle());
-        glBindTexture(st.target, texGroup->getHandle(texName));
+        glBindTexture(st.target, tex->getHandle());
     }
 }
 

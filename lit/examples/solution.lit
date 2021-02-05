@@ -36,9 +36,10 @@ public:
     };
 
     struct Window{
-        ImVec2 pos;
-        ImVec2 size;
-        ImVec2 winPos;
+        int x{0};
+        int y{0};
+        int width{0};
+        int height{0};
 
         bool sizeChanged{false};
         bool focused{false};
@@ -46,8 +47,8 @@ public:
 
         float dt{0};
 
-        auto getRect() const { return &pos.x; }
-        auto getAspectRatio() const { return size.y / size.x; }
+        auto getRect() const { return &x; }
+        auto getAspectRatio() const { return (float)height / width; }
     };
 
     struct Pane{
@@ -168,18 +169,17 @@ static std::vector<std::string> s_droppedFilenames;
 void Solution::Pane::updateWindow(){
     auto& io = GetIO();
     auto fbSize = io.DisplayFramebufferScale * io.DisplaySize;
-
     auto winSize = GetWindowSize();
+    auto winPos = GetWindowPos();
 
-    window.pos = GetWindowPos();
-    window.winPos = window.pos;
-    window.pos.y = fbSize.y - window.pos.y - winSize.y;
+    window.x = (int)winPos.x;
+    window.y = (int)(fbSize.y - winPos.y - winSize.y);
 
     window.sizeChanged =
-        (size_t)winSize.x != (size_t)window.size.x &&
-        (size_t)winSize.y != (size_t)window.size.y;
+        (int)winSize.x != window.width && (int)winSize.y != window.height;
 
-    window.size = winSize;
+    window.width = (int)winSize.x;
+    window.height = (int)winSize.y;
 
     window.justFocused = !window.focused && IsWindowFocused();
     window.focused = IsWindowFocused();
@@ -229,8 +229,8 @@ void Solution::Project::manipulateCamera(const CameraPtr& camera, const Solution
         return;
     }
 
-    if (input.x >= window.pos.x && input.x <= window.pos.x + window.size.x
-        && input.y >= window.pos.y && input.y <= window.pos.y + window.size.y){
+    if (input.x >= window.x && input.x <= window.x + window.width
+        && input.y >= window.y && input.y <= window.y + window.height){
 
         if (input.isMouseDown[0]){
              camera->circle(-input.dx * 0.1f, -input.dy * 0.1f);

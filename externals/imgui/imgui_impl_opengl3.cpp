@@ -286,6 +286,9 @@ static void ImGui_ImplOpenGL3_SetupRenderState(ImDrawData* draw_data, int fb_wid
     // added by czq on 2020/7/16
     glActiveTexture(GL_TEXTURE0);
 
+    // added by czq on 2021/1/28
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
     (void)vertex_array_object;
 #ifndef IMGUI_IMPL_OPENGL_ES2
     glBindVertexArray(vertex_array_object);

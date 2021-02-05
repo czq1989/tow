@@ -1,0 +1,226 @@
+@s
+
+
+--- framebuffer
+//=====================
+// framebuffer
+class Framebuffer;
+using FramebufferPtr = tow::ResourcePtr<Framebuffer>;
+
+class Framebuffer{
+    friend class GraphicPipeline;
+
+public:
+    struct Item{
+        int texelFormat{0};
+        SamplerParamPtr sp;
+    };
+
+    struct Attachment{
+        size_t location{0};
+        TexturePtr tex;
+    };
+
+private:
+    Framebuffer(){}
+public:
+    ~Framebuffer();
+
+public:
+    static FramebufferPtr create(int width = 0, int height = 0, int target = GL_FRAMEBUFFER);
+
+public:
+    void addAttachment(const std::string& outVarName, const Item& item);
+    void setAttachmentTexture(const std::string& outVarName, const TexturePtr& tex);
+    void setDepthAttachment(const Item& item);
+    void setDepthAttachment(const TexturePtr& tex);
+    void setSize(int width, int height) { texWidth = width; texHeight = height; }
+    void setStartLocation(size_t location) { startLocation = location; }
+
+    void bind(int x, int y, int width, int height);
+    void bind(int width, int height) { bind(0, 0, width, height); }
+    void bindRect(const int* rect) { bind(rect[0], rect[1], rect[2], rect[3]); }
+    void bindSize(const int* size) { bind(size[0], size[1]); }
+
+    auto getTarget() const { return target; }
+    auto getWidth() const { return texWidth; }
+    auto getHeight() const { return texHeight; }
+    auto getStartLocation() const { return startLocation; }
+    const auto& getAttachments() const { return attachmentMap; }
+    const auto& getTexture(const std::string& name) const { return attachmentMap.at(name).tex; }
+    const auto& getDepthTexture() const { return depthAttachment.tex; }
+    const auto& getAttachment(const std::string& name) const { return attachmentMap.at(name); }
+    int getAttachmentIndex(const std::string& name) const;
+
+    auto hasAttachment(const std::string& name) const { return attachmentMap.find(name) != attachmentMap.end(); }
+
+private:
+    auto getHandle() const { return fbHandle; }
+    void setBuffers();
+
+private:
+    int target{0};
+    GLuint fbHandle{0};
+    GLint lastHandle{0};
+
+    int texWidth{0};
+    int texHeight{0};
+
+    bool dirty{false};
+
+    size_t startLocation{0};
+
+    std::unordered_map<std::string, Attachment> attachmentMap;
+    Attachment depthAttachment;
+};
+
+---
+
+--- framebuffer implemention
+//====================================
+// framebuffer implemention
+Framebuffer::~Framebuffer(){
+    DEL_OBJECT(glDeleteFramebuffers, fbHandle);
+}
+
+FramebufferPtr Framebuffer::create(int width, int height, int target){
+    auto ptr = new Framebuffer();
+
+    ptr->target = target;
+    ptr->texWidth = width;
+    ptr->texHeight = height;
+
+    if (width > 0 && height > 0){
+        GEN_OBJECT(glGenFramebuffers, ptr->fbHandle);
+    }
+
+    return FramebufferPtr(ptr);
+}
+
+void Framebuffer::addAttachment(const std::string& outVarName, const Framebuffer::Item& item){
+    mAssert(fbHandle > 0);
+
+    auto tex = Texture::create2D(
+        {GL_TEXTURE_2D, 1, item.texelFormat, item.sp, texWidth, texHeight});
+
+    attachmentMap.insert({outVarName, {attachmentMap.size() + startLocation, tex}});
+
+    dirty = true;
+}
+
+void Framebuffer::setAttachmentTexture(const std::string& outVarName, const TexturePtr& tex){
+    mAssert(fbHandle > 0);
+    mAssert(hasAttachment(outVarName));
+
+    const auto& st = tex->getStorage();
+    mAssert(st.width == texWidth && st.height == texHeight);
+
+    const auto& att = getAttachment(outVarName);
+
+    attachmentMap[outVarName] = {att.location, tex};
+
+    dirty = true;
+}
+
+void Framebuffer::setDepthAttachment(const Framebuffer::Item& item){
+    mAssert(fbHandle > 0);
+
+    depthAttachment.tex = Texture::create2D(
+        {GL_TEXTURE_2D, 1, item.texelFormat, item.sp, texWidth, texHeight});
+
+    dirty = true;
+}
+
+void Framebuffer::setDepthAttachment(const TexturePtr& tex){
+    mAssert(fbHandle > 0);
+
+    const auto& st = tex->getStorage();
+    mAssert(st.width == texWidth && st.height == texHeight);
+
+    depthAttachment.tex = tex;
+
+    dirty = true;
+}
+
+int Framebuffer::getAttachmentIndex(const std::string& name) const{
+    mAssert(hasAttachment(name));
+    const auto& att = getAttachment(name);
+    return GL_COLOR_ATTACHMENT0 + att.location - startLocation;
+}
+
+void Framebuffer::setBuffers(){
+    if (!dirty) return;
+
+    dirty = false;
+
+    std::vector<GLenum> colorAttachments(startLocation + attachmentMap.size(), GL_NONE);
+
+    GLint maxDrawBuffers = 0;
+    glGetIntegerv(GL_MAX_DRAW_BUFFERS, &maxDrawBuffers);
+    mAssert(colorAttachments.size() <= (size_t)maxDrawBuffers);
+
+    for(const auto& pr : attachmentMap){
+        const auto& att = pr.second;
+        auto handle = att.tex->getHandle();
+        auto attIndex = getAttachmentIndex(pr.first);
+
+        glFramebufferTexture(target, attIndex, handle, 0);
+
+        colorAttachments[att.location] = attIndex;
+    }
+
+    if (!colorAttachments.empty()){
+        glDrawBuffers(colorAttachments.size(), colorAttachments.data());
+    }
+
+    if (depthAttachment.tex){
+        auto handle = depthAttachment.tex->getHandle();
+        glFramebufferTexture(target, GL_DEPTH_ATTACHMENT, handle, 0);
+    }
+
+    mAssert(glCheckFramebufferStatus(target) == GL_FRAMEBUFFER_COMPLETE);
+}
+
+static int getFramebufferBinding(int target){
+    switch(target){
+        case GL_FRAMEBUFFER:      return GL_FRAMEBUFFER_BINDING;
+        case GL_READ_FRAMEBUFFER: return GL_READ_FRAMEBUFFER_BINDING;
+        case GL_DRAW_FRAMEBUFFER: return GL_DRAW_FRAMEBUFFER_BINDING;
+        default: mAssert(false);
+    }
+    return 0;
+}
+
+void Framebuffer::bind(int x, int y, int width, int height){
+    mAssert(width > 0);
+    mAssert(height > 0);
+
+    if (fbHandle > 0){
+        if (width != texWidth || height != texHeight){
+            texWidth = width;
+            texHeight = height;
+            dirty = true;
+
+            for(const auto& pr : attachmentMap){
+                const auto& att = pr.second;
+                att.tex->resize2D(texWidth, texHeight);
+            }
+
+            if (depthAttachment.tex){
+                depthAttachment.tex->resize2D(texWidth, texHeight);
+            }
+        }
+    }
+
+    glGetIntegerv(getFramebufferBinding(target), &lastHandle);
+    if ((GLuint)lastHandle != fbHandle){
+        glBindFramebuffer(target, fbHandle);
+    }
+
+    glViewport(x, y, width, height);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x, y, width, height);
+
+    setBuffers();
+}
+---

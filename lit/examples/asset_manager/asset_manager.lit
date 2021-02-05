@@ -141,7 +141,7 @@ const FontCache::Glyph& FontCache::getGlyph(int cp, const std::string& fontName,
 
     auto createTex = [&, this](const std::string& fontName)->std::string{
         std::string texName;
-        strFormat(texName, "%s_%u", fontName.c_str(), texGroup->getStorageMap().size());
+        strFormat(texName, "%s_%u", fontName.c_str(), texGroup->getTexMap().size());
         texGroup->create2D(texName, {GL_TEXTURE_2D, 1, GL_R8, sampler, kTexWidth, kTexHeight});
         return texName;
     };
@@ -200,7 +200,7 @@ const FontCache::Glyph& FontCache::getGlyph(int cp, const std::string& fontName,
             record.maxHeight = bitmapSize.y + 2 * extraSpacing;
         }
 
-        tow::TexGroup::Block bk = {
+        tow::Texture::Block bk = {
             &pixels[0],
             (size_t)(record.offset.x + extraSpacing), (size_t)(record.offset.y + extraSpacing), 0,
             bitmapSize.x, bitmapSize.y
@@ -237,19 +237,14 @@ public:
         int componentCount{0};
     };
 
-    struct Texture{
-        tow::TexGroupPtr texGroup;
-        std::string texName;
-        tow::SamplerParamPtr sp;
-    };
 public:
     ImageCache();
 
 public:
     // read
-    void loadImage8(const std::string& filename, const Texture& tex = {}, bool flipV = false);
-    void loadImage16(const std::string& filename, const Texture& tex = {}, bool flipV = false);
-    void loadImagef(const std::string& filename, const Texture& tex = {}, bool flipV = false);
+    tow::TexturePtr loadImage8(const std::string& filename, bool flipV = false);
+    tow::TexturePtr loadImage16(const std::string& filename, bool flipV = false);
+    tow::TexturePtr loadImagef(const std::string& filename, bool flipV = false);
 
     // write
     void writeImage(const std::string& filename, int width, int height, int component, const void* data);
@@ -264,21 +259,18 @@ public:
 private:
     using stbImageLoader = std::function<void*(const char*, int*, int*, int*, int)>;
 
-    void loadImage(stbImageLoader loader, const std::string& filename, const Texture& tex,
-        int bits, int componentType, bool flipV);
+    tow::TexturePtr loadImage(stbImageLoader loader, const std::string& filename, int bits,
+        int componentType, bool flipV);
 
 private:
     std::map<std::string, Image> imageMap;
-    tow::SamplerParamPtr defaultSampler;
 };
 ---
 
 --- image cache implemention
 //----------------------------
 // image cache implemention
-ImageCache::ImageCache(){
-    defaultSampler = tow::SamplerParam::create();
-}
+ImageCache::ImageCache(){}
 
 void ImageCache::removeImage(const std::string& filename){
     auto& image = imageMap.at(filename);
@@ -295,12 +287,11 @@ void ImageCache::destroy(){
         }
     }
     imageMap.clear();
-    defaultSampler = nullptr;
 }
 
 
-void ImageCache::loadImage(stbImageLoader loader, const std::string& filename,
-    const ImageCache::Texture& tex, int bits, int componentType, bool flipV){
+tow::TexturePtr ImageCache::loadImage(stbImageLoader loader, const std::string& filename,
+    int bits, int componentType, bool flipV){
 
     constexpr int reqComp = 4; // for compatibility
 
@@ -339,41 +330,39 @@ void ImageCache::loadImage(stbImageLoader loader, const std::string& filename,
         stbi_set_flip_vertically_on_load(lastFlip);
     }
 
-    if (tex.texGroup && imageMap.find(filename) != imageMap.end()){
-        tow::SamplerParamPtr sampler = tex.sp;
-        if (!sampler){
-            sampler = defaultSampler;
-        }
+    TexturePtr tex;
+    if (imageMap.find(filename) != imageMap.end()){
 
         auto format = getTexFormat({reqComp, bits, componentType});
         const auto& image = imageMap.at(filename);
 
         if (image.pixelPtrs.size() == 6){
-            std::vector<TexGroup::Block> bks;
+            std::vector<tow::Texture::Block> bks;
             for(auto p : image.pixelPtrs){
                 bks.push_back({p});
             }
-            tex.texGroup->create2D(tex.texName,
-                {GL_TEXTURE_CUBE_MAP, 1, format.second, sampler, image.width, image.height});
-            tex.texGroup->writeCubeMap(tex.texName, bks, {format.first, 0, componentType});
+            tex = Texture::create2D(
+                {GL_TEXTURE_CUBE_MAP, 1, format.second, nullptr, image.width, image.height});
+            tex->writeCubeMap(bks, {format.first, 0, componentType});
         }else{
-            tex.texGroup->create2D(tex.texName,
-                {GL_TEXTURE_2D, 1, format.second, sampler, image.width, image.height});
-            tex.texGroup->write2D(tex.texName, {image.pixelPtrs[0]}, {format.first, 0, componentType});
+            tex= Texture::create2D(
+                {GL_TEXTURE_2D, 1, format.second, nullptr, image.width, image.height});
+            tex->write2D({image.pixelPtrs[0]}, {format.first, 0, componentType});
         }
     }
+    return tex;
 }
 
-void ImageCache::loadImage8(const std::string& filename, const ImageCache::Texture& tex, bool flipV){
-    loadImage(stbi_load, filename, tex, 8, GL_UNSIGNED_BYTE, flipV);
+tow::TexturePtr ImageCache::loadImage8(const std::string& filename, bool flipV){
+    return loadImage(stbi_load, filename, 8, GL_UNSIGNED_BYTE, flipV);
 }
 
-void ImageCache::loadImage16(const std::string& filename, const ImageCache::Texture& tex, bool flipV){
-    loadImage(stbi_load_16, filename, tex, 16, GL_UNSIGNED_SHORT, flipV);
+tow::TexturePtr ImageCache::loadImage16(const std::string& filename, bool flipV){
+    return loadImage(stbi_load_16, filename, 16, GL_UNSIGNED_SHORT, flipV);
 }
 
-void ImageCache::loadImagef(const std::string& filename, const ImageCache::Texture& tex, bool flipV){
-    loadImage(stbi_loadf, filename, tex, 32, GL_FLOAT, flipV);
+tow::TexturePtr ImageCache::loadImagef(const std::string& filename, bool flipV){
+    return loadImage(stbi_loadf, filename, 32, GL_FLOAT, flipV);
 }
 
 void ImageCache::writeImage(const std::string& filename, int width, int height, int component, const void* data){

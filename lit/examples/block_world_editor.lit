@@ -8,7 +8,7 @@
 #include "glm.hpp"
 #include "example_util.h"
 #include "camera.h"
-#include "color_pass.h"
+#include "post_process.h"
 #include "directional_lighting.h"
 
 #include <unordered_map>
@@ -175,10 +175,6 @@ ResManagerPtr ResManager::get(){
 
 ResManager::ResManager(){
     texGroup = tow::TexGroup::create();
-
-    const auto sp = texGroup->getDefaultSampler();
-    sp->set(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    sp->set(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }
 
 ResManager::Buffer ResManager::load(const std::string& filename, IdType id){
@@ -249,15 +245,21 @@ ResManager::Buffer ResManager::load(const std::string& filename, IdType id){
     if (!model->textures.empty()){
         buf.texName = filename + "_baseColor";
 
-        const auto& tex = model->textures.at(0);
-        assert(tex.source >= 0);
+        if (!texGroup->has(buf.texName)){
+            const auto& tex = model->textures.at(0);
+            assert(tex.source >= 0);
 
-        const auto& image = model->images.at(tex.source);
-        const auto& format = getTexFormat({image.component, image.bits, image.pixel_type});
-        auto pixelFormat = format.first;
-        auto texelFormat = format.second;
-        texGroup->create2D(buf.texName, {GL_TEXTURE_2D, 1, texelFormat, nullptr, image.width, image.height});
-        texGroup->write2D(buf.texName, {image.image.data()}, {pixelFormat});
+            const auto& image = model->images.at(tex.source);
+            const auto& format = getTexFormat({image.component, image.bits, image.pixel_type});
+            auto pixelFormat = format.first;
+            auto texelFormat = format.second;
+            texGroup->create2D(buf.texName, {GL_TEXTURE_2D, 1, texelFormat, nullptr, image.width, image.height});
+            texGroup->write2D(buf.texName, {image.image.data()}, {pixelFormat});
+
+            const auto& sp = texGroup->getSampler(buf.texName);
+            sp->set(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            sp->set(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
     }
 
     return buf;
@@ -498,14 +500,14 @@ void MoveGizmo::resetColors(){
 
 bool MoveGizmo::isHit(const CameraPtr& cam, const Solution::Pane& pane, int& index){
     const auto& win = pane.window;
-    auto x = pane.input.x - win.pos.x - win.size.x * 0.5f;
-    auto y = pane.input.y - win.pos.y - win.size.y * 0.5f;
+    auto x = pane.input.x - win.x - win.width * 0.5f;
+    auto y = pane.input.y - win.y - win.height * 0.5f;
     const auto& persp = cam->getPersp();
     auto t = tanf(radians(persp.yfov * 0.5f)) * persp.znear;
     auto r = t / persp.aspectRatio;
 
-    x = x / win.size.x * 2 * r;
-    y = y / win.size.y * 2 * t;
+    x = x / win.width * 2 * r;
+    y = y / win.height * 2 * t;
     auto z = -persp.znear;
     auto view2world = inverse(cam->getViewMat());
     auto p = vec3(view2world * vec4(x, y, z, 1));
@@ -845,8 +847,11 @@ private:
 //-----------------------------------
 // environment cube implemention
 EnvironmentCube::EnvironmentCube(const std::string& filename, const glm::vec3& scale) : Block(){
-    ImageAsset()->loadImage8("assets/env_maps/sh_%s.png",
-        {ResManager::get()->getTexGroup(), "s_envCube"});
+    auto resTexGroup = ResManager::get()->getTexGroup();
+    if (!resTexGroup->has("s_envCube")){
+        auto tex = ImageAsset()->loadImage8("assets/env_maps/sh_%s.png");
+        resTexGroup->add("s_envCube", tex);
+    }
 
     buffer = ResManager::get()->load(filename, 0);
     passName = "envCube";
@@ -950,10 +955,10 @@ private:
     tow::FramebufferPtr flagFb;
     tow::GraphicPipelinePtr flagPipeline;
     tow::FramebufferPtr outlineFb;
-    ColorPassPtr outlinePass;
+    PostProcessPtr outlinePass;
 
     // post process
-    ColorPassPtr postProcess;
+    PostProcessPtr postProcess;
 
     uint32_t hittingObjId{0};
 
@@ -998,7 +1003,10 @@ Renderer::Renderer(){
 
     vertexArray = VertexArray::create({bufGroup, "b_vertex", "b_index"}, layout);
 
-    //--------------------------
+    //===================================
+    // framebuffers
+
+    //-------------------
     // default framebuffer
     defaultFb = Framebuffer::create();
 
@@ -1011,28 +1019,28 @@ Renderer::Renderer(){
     sp->set(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
     gbufferFb = Framebuffer::create(1, 1);
-    gbufferFb->addAttachment("f_color", {"s_color", GL_RGBA8, colorSp});
-    gbufferFb->addAttachment("f_id", {"s_id", GL_R32UI, sp});
-    gbufferFb->setDepthAttachment({"s_depth", GL_DEPTH_COMPONENT24, sp});
-
-    //todo:connect program fs output and fb
+    gbufferFb->addAttachment("f_color", {GL_RGBA8, colorSp});
+    gbufferFb->addAttachment("f_id", {GL_R32UI, sp});
+    gbufferFb->setDepthAttachment({GL_DEPTH_COMPONENT24, sp});
 
     gbufferPipeline = GraphicPipeline::create(vertexArray, {
         "assets/shaders/block_world_editor_gbuffer.vert",
         "assets/shaders/block_world_editor_gbuffer.frag",
     });
 
-    const auto& pp = gbufferPipeline->getProgram();//todo
-    pp->setProgramOutputLocation("f_color", 0);
-    pp->setProgramOutputLocation("f_id", 1);
-
+    const auto& pp = gbufferPipeline->getProgram();
+    pp->setProgramOutputLocations(gbufferFb);
     pp->bindUniformBlock("DirectionalLighting", dirLighting->getBufferBinding());
+
+    const auto resTexGroup = ResManager::get()->getTexGroup();
+    resTexGroup->add("s_envCube", ImageAsset()->loadImage8("assets/env_maps/sh_%s.png"));
+    pp->setSampler(resTexGroup, "s_envCube", "s_irradiance");
 
     //----------------
     // flag
     flagFb = Framebuffer::create(1, 1);
-    flagFb->addAttachment("f_flag", {"s_flag", GL_RG32F, sp});
-    flagFb->setDepthAttachment({"s_depth", GL_DEPTH_COMPONENT24, sp});
+    flagFb->addAttachment("f_flag", {GL_RG32F, sp});
+    flagFb->setDepthAttachment({GL_DEPTH_COMPONENT24, sp});
 
     flagPipeline = GraphicPipeline::create(vertexArray, {
         "assets/shaders/block_world_editor_flag.vert",
@@ -1042,30 +1050,24 @@ Renderer::Renderer(){
     //----------------
     // outline
     outlineFb = Framebuffer::create(1, 1);
-    outlineFb->addAttachment("f_outline", {"s_outline", GL_RG32F, sp});
+    outlineFb->addAttachment("f_outline", {GL_RG32F, sp});
 
-    outlinePass = ColorPass::create({
+    outlinePass = PostProcess::create({
         "assets/shaders/block_world_editor_outline.vert",
         "assets/shaders/block_world_editor_outline.frag",
     });
-    outlinePass->getProgram()->setSampler(flagFb->getTexGroup(), "s_flag");
+    outlinePass->getProgram()->setSampler("s_flag", flagFb->getTexture("f_flag"));
 
     //--------------------------------------
     // post process
-    postProcess = ColorPass::create({
+    postProcess = PostProcess::create({
         "assets/shaders/block_world_editor_pp.vert",
         "assets/shaders/block_world_editor_pp.frag",
     });
     const auto& prog = postProcess->getProgram();
-    const auto& gbufferTexGroup = gbufferFb->getTexGroup();
-    prog->setSampler(gbufferTexGroup, "s_color");
-    prog->setSampler(gbufferTexGroup, "s_depth");
-    prog->setSampler(outlineFb->getTexGroup(), "s_outline");
-
-    ImageAsset()->loadImage8("assets/env_maps/%s.jpg",
-        {ResManager::get()->getTexGroup(), "s_envCube"});
-    pp->setSampler(ResManager::get()->getTexGroup(), "s_envCube", "s_irradiance");//todo
-
+    prog->setSampler("s_color", gbufferFb->getTexture("f_color"));
+    prog->setSampler("s_depth", gbufferFb->getDepthTexture());
+    prog->setSampler("s_outline", outlineFb->getTexture("f_outline"));
     prog->checkAll();
 
     //------------------------
@@ -1101,7 +1103,7 @@ void Renderer::render(const CameraPtr& cam, const Solution::Pane& pane){
     const auto& win = pane.window;
     const auto& input = pane.input;
     auto pvm = cam->getPerspViewMat();
-    uvec2 localPt{std::max(input.x - win.pos.x, 0.0f), std::max(input.y - win.pos.y, 0.0f)};
+    uvec2 localPt{std::max(input.x - win.x, 0.0f), std::max(input.y - win.y, 0.0f)};
 
     //---------------------
     // fill buffers
@@ -1118,16 +1120,12 @@ void Renderer::render(const CameraPtr& cam, const Solution::Pane& pane){
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClearDepth(1.0f);
 
-    vec2 winSize{win.size.x, win.size.y};
-    winSize *= 1.0f;
-    localPt *= 1.0f;
-
     // get current gl states
     snapshot->take();
 
     //----------------
     // gbuffer pass
-    gbufferFb->bind(winSize.x, winSize.y);
+    gbufferFb->bind(win.width, win.height);
     glEnable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -1152,20 +1150,20 @@ void Renderer::render(const CameraPtr& cam, const Solution::Pane& pane){
         cmd(gbufferPipeline);
     }
 
-    glReadBuffer(GL_COLOR_ATTACHMENT1);//todo
+    glReadBuffer(gbufferFb->getAttachmentIndex("f_id"));
     hittingObjId = 0;
     glReadPixels(localPt.x, localPt.y, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &hittingObjId);
 
     //---------------------------
     // selection frame pass
-    outlineFb->bind(winSize.x, winSize.y);
+    outlineFb->bind(win.width, win.height);
     glClear(GL_COLOR_BUFFER_BIT);
     glPolygonOffset(-1, 1);
 
     flagPipeline->getProgram()->setUniformf("u_pvm", {&pvm, 16});
 
     for(const auto& cmd : selectedCmds){
-        flagFb->bind(winSize.x, winSize.y);
+        flagFb->bind(win.width, win.height);
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
         glDepthMask(GL_TRUE);
@@ -1175,7 +1173,7 @@ void Renderer::render(const CameraPtr& cam, const Solution::Pane& pane){
         drawElements(flagPipeline, GL_TRIANGLES, cmd.startIndex, cmd.indexCount);
         glDisable(GL_POLYGON_OFFSET_FILL);
 
-        outlineFb->bind(winSize.x, winSize.y);
+        outlineFb->bind(win.width, win.height);
         glDisable(GL_DEPTH_TEST);
         outlinePass->draw();
     }
@@ -1377,6 +1375,7 @@ BlockWorldEditor::BlockWorldEditor(const std::string& name) : Project(name){
 }
 
 void BlockWorldEditor::exit(){
+    bw::ResManager::get()->getTexGroup()->clear();
 }
 
 void BlockWorldEditor::setup(){
@@ -1432,8 +1431,8 @@ void BlockWorldEditor::showMainView(Solution::Pane& pane){
 
             //--------------
             // camera
-            cam->getPersp().aspectRatio = win.size.y / win.size.x;
-            cam->getOrtho().mag = {win.size.x, win.size.y};
+            cam->getPersp().aspectRatio = win.getAspectRatio();
+            cam->getOrtho().mag = {win.width, win.height};
             manipulateCamera(cam, pane);
 
             //-----------------
@@ -1462,8 +1461,8 @@ void BlockWorldEditor::manipulateCamera(const CameraPtr& camera, const Solution:
         return;
     }
 
-    if (input.x >= window.pos.x && input.x <= window.pos.x + window.size.x
-        && input.y >= window.pos.y && input.y <= window.pos.y + window.size.y){
+    if (input.x >= window.x && input.x <= window.x + window.width
+        && input.y >= window.y && input.y <= window.y + window.height){
 
         if (IsKeyDown(GLFW_KEY_LEFT_ALT) && input.isMouseDown[0]){
              camera->circle(-input.dx * 0.1f, -input.dy * 0.1f);

@@ -10,7 +10,7 @@
 #include "coordinate_axis.h"
 #include "skeleton_group.h"
 #include "directional_lighting.h"
-#include "color_pass.h"
+#include "post_process.h"
 #include "environment_cube.h"
 
 class GltfModelViewer : public Solution::Project{
@@ -41,8 +41,8 @@ private:
 
     DirectionalLightingPtr dirLighting;
 
-    ColorPassPtr colorPass;
-    ColorPassPtr fxaaPass;
+    PostProcessPtr colorPass;
+    PostProcessPtr fxaaPass;
 
     SkeletonGroupPtr skGroup;
 
@@ -175,8 +175,8 @@ void GltfModelViewer::setup(){
     colorPassFb = Framebuffer::create();
 
     imagePassFb = Framebuffer::create(1, 1);
-    imagePassFb->addAttachment("f_color", {"s_color", GL_RGB8});
-    imagePassFb->setDepthAttachment({"s_depth", GL_DEPTH_COMPONENT24});
+    imagePassFb->addAttachment("f_color", {GL_RGB8});
+    imagePassFb->setDepthAttachment({GL_DEPTH_COMPONENT24});
 
     //----------------
     // default camera
@@ -197,12 +197,9 @@ void GltfModelViewer::setup(){
 
     //-----------------
     // post-processing
-    colorPass = ColorPass::create({
-        "assets/shaders/color_pass.vert",
-        "assets/shaders/color_pass.frag"
-    });
+    colorPass = PostProcess::create();
 
-    fxaaPass = ColorPass::create({
+    fxaaPass = PostProcess::create({
         "assets/shaders/fxaa.vert",
         "assets/shaders/fxaa.frag"
     });
@@ -215,8 +212,8 @@ void GltfModelViewer::setup(){
     //------------------
     // matcap maps
     matcapTexGroup = TexGroup::create();
-    ImageAsset()->loadImage8(
-        "assets/matcap_maps/matcap0.jpg", {matcapTexGroup, "s_matcap"}, true);
+    matcapTexGroup->add("s_matcap", ImageAsset()->loadImage8(
+        "assets/matcap_maps/matcap0.jpg", true));
 
     //------------
     // gltf model
@@ -281,6 +278,9 @@ void GltfModelViewer::setup(){
 }
 
 void GltfModelViewer::render(Solution::Pane& pane, bool isMainView){
+    auto& window = pane.window;
+    vec2 winSize(window.width, window.height);
+
     //------------------------
     // handle dropped files
     if (!droppedFiles->empty()){
@@ -314,15 +314,15 @@ void GltfModelViewer::render(Solution::Pane& pane, bool isMainView){
         prog->setUniformf("u_eyePos", {&eye, 3});
         prog->setUniformf("u_pvMat", {&pvMat, 16});
         prog->setUniformf("u_viewMat", {&viewMat, 16});
-        prog->setUniformf("u_viewportSize", {&pane.window.size, 2});
+        prog->setUniformf("u_viewportSize", {&winSize, 2});
         prog->setSubroutine(GL_FRAGMENT_SHADER, "u_pass",
             isMainView ? "pbr" : passNameMap.at(panelParam.passNameIndex).second);
     }
 
     //----------------
     // image pass
-    auto size = panelParam.aaIndex == 0 ? pane.window.size * 2.0f : pane.window.size;
-    imagePassFb->bindSize(&size.x);
+    auto size = panelParam.aaIndex == 0 ? winSize * 2.0f : winSize;
+    imagePassFb->bind((int)size.x, (int)size.y);
 
     // clear states
     glEnable(GL_DEPTH_TEST);
@@ -377,12 +377,12 @@ void GltfModelViewer::render(Solution::Pane& pane, bool isMainView){
 
     glDepthMask(GL_FALSE);
     if (panelParam.aaIndex == 1){
-        vec2 texelSize(1 / pane.window.size.x, 1 / pane.window.size.y);
+        vec2 texelSize(1 / winSize.x, 1 / winSize.y);
         fxaaPass->getProgram()->setUniformf("u_texelSize", {&texelSize, 2});
-        fxaaPass->draw(imagePassFb->getTexGroup(), "s_color");
+        fxaaPass->draw("s_color", imagePassFb->getTexture("f_color"));
 
     }else{
-        colorPass->draw(imagePassFb->getTexGroup(), "s_color");
+        colorPass->draw("s_color", imagePassFb->getTexture("f_color"));
     }
     glDepthMask(GL_TRUE);
 

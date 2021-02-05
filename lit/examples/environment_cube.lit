@@ -54,9 +54,9 @@ EnvironmentCubePtr EnvironmentCube::create(const std::string& cubeFilename, floa
     // load cube image
     auto texGroup = TexGroup::create();
     if (getSuffix(cubeFilename) == "hdr"){
-        ImageAsset()->loadImagef(cubeFilename, {texGroup, "s_cube"}, flipV);
+        texGroup->add("s_cube", ImageAsset()->loadImagef(cubeFilename, flipV));
     }else{
-        ImageAsset()->loadImage8(cubeFilename, {texGroup, "s_cube"}, flipV);
+        texGroup->add("s_cube", ImageAsset()->loadImage8(cubeFilename, flipV));
     }
     ptr->texGroup = texGroup;
 

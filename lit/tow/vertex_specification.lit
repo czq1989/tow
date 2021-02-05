@@ -4,7 +4,6 @@
 // vertex specification
 
 @{vertex layout}
-@{buffer group}
 @{vertex array}
 ---
 
@@ -13,13 +12,15 @@
 // vertex specification implemention
 
 @{vertex layout implemention}
-@{buffer group implemention}
 @{vertex array implemention}
 ---
 
 --- vertex layout
 //--------------------
 // vertex layout
+class VertexLayout;
+using VertexLayoutPtr = ResourcePtr<VertexLayout>;
+
 class VertexLayout{
 public:
     struct Attribute{
@@ -56,7 +57,6 @@ private:
     std::map<std::string, size_t> locationMap;
     size_t byteStride{0};
 };
-using VertexLayoutPtr = ResourcePtr<VertexLayout>;
 ---
 
 --- vertex layout implemention
@@ -97,134 +97,6 @@ size_t VertexLayout::getByteElement(const std::string& name) const{
 }
 ---
 
---- buffer group
-//----------------------
-// buffer group
-class BufferGroup{
-    friend class VertexArray;
-    friend class BufferBinding;
-
-public:
-    struct Item{
-        int target{0};
-        size_t byteElement{0};
-        size_t elementCount{0};
-        int usage{GL_STATIC_DRAW};
-    };
-    struct Block{
-        const void* data{nullptr};
-        size_t offset{0};
-        size_t size{0};
-    };
-    struct MappedBuffer{
-        friend class BufferGroup;
-    public:
-        void* begin();
-        void write(const Block& bk);
-        void end();
-
-    private:
-        GLuint handle{0};
-        int target{0};
-        int access{0};
-        void *ptr{nullptr};
-    };
-
-private:
-    BufferGroup(){}
-public:
-    ~BufferGroup();
-public:
-    static ResourcePtr<BufferGroup> create();
-
-public:
-    const auto& getItem(const std::string& name) const { return itemMap.at(name); }
-    MappedBuffer getMappedBuffer(const std::string& name, int access = GL_WRITE_ONLY);
-
-    void createBuffer(const std::string& name, const void* data, const Item& item);
-
-    void write(const std::string& name, const void* data, size_t offset, size_t size);
-    void write(const std::string& name, const std::vector<Block>& blocks);
-    void write(const std::string& name, const Block& block) { write(name, {block}); }
-
-    auto has(const std::string& name) const { return itemMap.find(name) != itemMap.end(); }
-
-private:
-    auto getHandle(const std::string& name) const { return handleMap.at(name); }
-
-private:
-    std::map<std::string, GLuint> handleMap;
-    std::map<std::string, Item> itemMap;
-};
-using BufferGroupPtr = ResourcePtr<BufferGroup>;
----
-
---- buffer group implemention
-//-----------------------------
-// buffer group implemention
-BufferGroup::~BufferGroup(){
-    for(const auto& pr : handleMap){
-        DEL_OBJECT(glDeleteBuffers, pr.second);
-    }
-}
-
-BufferGroupPtr BufferGroup::create(){
-    return BufferGroupPtr(new BufferGroup());
-}
-
-void BufferGroup::createBuffer(const std::string& name, const void* data, const Item& item){
-    itemMap[name] = item;
-
-    if (handleMap.find(name) == handleMap.end()){
-        GEN_OBJECT(glGenBuffers, handleMap[name]);
-    }
-
-    glBindBuffer(item.target, handleMap[name]);
-    glBufferData(item.target, item.byteElement * item.elementCount, data, item.usage);
-    glBindBuffer(item.target, 0);
-}
-
-void BufferGroup::write(const std::string& name, const void* data, size_t offset, size_t size){
-    auto& item = itemMap.at(name);
-
-    glBindBuffer(item.target, handleMap.at(name));
-    glBufferSubData(item.target, offset, size, data);
-    glBindBuffer(item.target, 0);
-}
-
-void BufferGroup::write(const std::string& name, const std::vector<BufferGroup::Block>& blocks){
-    for(const auto& bk : blocks){
-        write(name, bk.data, bk.offset, bk.size);
-    }
-}
-
-BufferGroup::MappedBuffer BufferGroup::getMappedBuffer(const std::string& name, int access){
-    BufferGroup::MappedBuffer buf;
-    buf.handle = getHandle(name);
-    buf.target = getItem(name).target;
-    buf.access = access;
-    return buf;
-}
-
-void* BufferGroup::MappedBuffer::begin(){
-    mAssert(!ptr);
-    glBindBuffer(target, handle);
-    ptr = glMapBuffer(target, access);
-    mAssert(ptr);
-    return ptr;
-}
-
-void BufferGroup::MappedBuffer::write(const BufferGroup::Block& bk){
-    mAssert(ptr);
-    memcpy((uint8_t*)ptr + bk.offset, bk.data, bk.size);
-}
-
-void BufferGroup::MappedBuffer::end(){
-    mAssert(ptr);
-    glUnmapBuffer(target);
-    ptr = nullptr;
-}
----
 --- vertex array
 //---------------------
 // vertex array
@@ -240,11 +112,11 @@ public:
         std::string vertexName;
         std::string indexName;
 
-        auto hasIndexItem() const { return bufGroup->has(indexName); }
-        auto getIndexHandle() const { return bufGroup->getHandle(indexName); }
-        auto getVertexHandle() const { return bufGroup->getHandle(vertexName); }
-        const auto& getIndexItem() const { return bufGroup->getItem(indexName); }
-        const auto& getVertexItem() const { return bufGroup->getItem(vertexName); }
+        auto hasIndexBufferDesc() const { return bufGroup->has(indexName); }
+        auto getIndexBufferHandle() const { return bufGroup->getHandle(indexName); }
+        auto getVertexBufferHandle() const { return bufGroup->getHandle(vertexName); }
+        const auto& getIndexBufferDesc() const { return bufGroup->getDesc(indexName); }
+        const auto& getVertexBufferDesc() const { return bufGroup->getDesc(vertexName); }
     };
 
 private:
@@ -257,14 +129,17 @@ public:
 
 private:
     auto getHandle() const { return vaHandle;}
+    auto getVertexBufferHandle() const { return vaBuffer.getVertexBufferHandle(); }
+    auto getIndexBufferHandle() const { return vaBuffer.getIndexBufferHandle(); }
 
 public:
     const auto& getVertexLayout() const { return vertexLayout; }
     const auto& getBufferGroup() const { return vaBuffer.bufGroup; }
+    auto hasIndexBufferDesc() const { return vaBuffer.hasIndexBufferDesc(); }
 
-    auto getByteIndex() const { return vaBuffer.getIndexItem().byteElement;}
-    auto getIndexCount() const { return vaBuffer.getIndexItem().elementCount; }
-    auto getVertexCount() const { return vaBuffer.getVertexItem().elementCount; }
+    auto getByteIndex() const { return vaBuffer.getIndexBufferDesc().byteElement;}
+    auto getIndexCount() const { return vaBuffer.getIndexBufferDesc().elementCount; }
+    auto getVertexCount() const { return vaBuffer.getVertexBufferDesc().elementCount; }
     auto getIndexType() const { return indexType; }
 
 private:
@@ -290,12 +165,12 @@ VertexArrayPtr VertexArray::create(const VertexArray::Buffer& buf, VertexLayoutP
     glBindVertexArray(ptr->vaHandle);
 
     // bind vertex buffer
-    mAssert(buf.getVertexItem().target == GL_ARRAY_BUFFER);
-    glBindBuffer(GL_ARRAY_BUFFER, buf.getVertexHandle());
+    mAssert(buf.getVertexBufferDesc().target == GL_ARRAY_BUFFER);
+    glBindBuffer(GL_ARRAY_BUFFER, buf.getVertexBufferHandle());
 
     // bind index buffer
-    if (buf.hasIndexItem()){
-        switch(buf.getIndexItem().byteElement){
+    if (buf.hasIndexBufferDesc()){
+        switch(buf.getIndexBufferDesc().byteElement){
             case sizeof(GLubyte):
                 ptr->indexType = GL_UNSIGNED_BYTE;
                 break;
@@ -309,8 +184,8 @@ VertexArrayPtr VertexArray::create(const VertexArray::Buffer& buf, VertexLayoutP
                 mAssert(false);
         }
 
-        mAssert(buf.getIndexItem().target == GL_ELEMENT_ARRAY_BUFFER);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf.getIndexHandle());
+        mAssert(buf.getIndexBufferDesc().target == GL_ELEMENT_ARRAY_BUFFER);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf.getIndexBufferHandle());
     }
 
     // specify vertex layout

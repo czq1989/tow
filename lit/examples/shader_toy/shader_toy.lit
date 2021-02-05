@@ -8,7 +8,7 @@
 
 #include "tow.h"
 #include "solution.h"
-#include "color_pass.h"
+#include "post_process.h"
 
 //---------------
 // shader toy
@@ -29,7 +29,7 @@ private:
     void showChannelView(Solution::Pane& pane);
 
 private:
-    ColorPassPtr colorPass;
+    PostProcessPtr colorPass;
     tow::FramebufferPtr defaultFb;
     tow::TexGroupPtr texGroup;
 
@@ -106,7 +106,7 @@ void ShaderToy::setup(){
     std::string dir = "assets/shaders/shader_toy/";
     std::string fs = dir + desc.name;
     std::string vs = dir + "shader_toy_debug.vert";
-    colorPass = ColorPass::create({vs.c_str(), fs.c_str()});
+    colorPass = PostProcess::create({vs.c_str(), fs.c_str()});
 
     texGroup = TexGroup::create();
 
@@ -114,19 +114,19 @@ void ShaderToy::setup(){
     int i = 0;
     for(const auto& channel : desc.channels){
         strFormat(channelName, "iChannel%d", i++);
-        ImageAsset()->loadImage8(
-            "assets/images/" + channel.path, {texGroup, channelName}, channel.vFlip);
+        texGroup->add(channelName, ImageAsset()->loadImage8(
+            "assets/images/" + channel.path, channel.vFlip));
     }
 
     defaultFb = Framebuffer::create();
 }
 
 void ShaderToy::render(const Solution::Pane& pane){
-    ImVec3 res(pane.window.size.x, pane.window.size.y, 0);
+    ImVec3 res((float)pane.window.width, (float)pane.window.height, 0);
 
     const auto& win = pane.window;
 
-    defaultFb->bind(win.pos.x, win.pos.y, res.x, res.y);
+    defaultFb->bindRect(win.getRect());
 
     float dt = 0;
     if (!param.paused){
@@ -137,14 +137,15 @@ void ShaderToy::render(const Solution::Pane& pane){
 
     const auto& prog = colorPass->getProgram();
 
-    for(const auto& pr : texGroup->getStorageMap()){
+    for(const auto& pr : texGroup->getTexMap()){
         if (prog->hasSampler(pr.first.c_str())){
             prog->setSampler(texGroup, pr.first);
         }
     }
 
     if (prog->hasUniform("u_origin")){
-        prog->setUniformf("u_origin", {&pane.window.pos, 2});
+        auto pos = glm::vec2(win.x, win.y);
+        prog->setUniformf("u_origin", {&pos.x, 2});
     }
 
     if (prog->hasUniform("iResolution")){
@@ -209,7 +210,7 @@ void ShaderToy::showMainView(Solution::Pane& pane){
             }
             EndChild();
 
-            PushStyleColor(ImGuiCol_ChildBg, ImVec4(1, 1, 1, 1));
+            PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.94f, 0.94f, 0.94f, 1.0f));
             PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
             PushStyleColor(ImGuiCol_ButtonActive, kHoveredColor);
             if (BeginChild("control bar")){
@@ -241,7 +242,7 @@ void ShaderToy::showMainView(Solution::Pane& pane){
 
                 auto reloadFunc = [this]{
                     auto lastIndex = param.shaderIndex;
-                    param = Parameter();
+                    //param = Parameter();
                     param.shaderIndex = lastIndex;
                     setup();
                 };

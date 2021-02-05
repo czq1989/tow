@@ -3,7 +3,6 @@
 //=====================
 // pipeline
 
-@{framebuffer}
 @{graphic pipeline}
 @{compute pipeline}
 ---
@@ -12,205 +11,10 @@
 //=========================
 // pipeline implemention
 
-@{framebuffer implemention}
 @{graphic pipeline implemention}
 @{compute pipeline implemention}
 ---
 
-
---- framebuffer
-//-----------------
-// framebuffer
-class Framebuffer;
-using FramebufferPtr = tow::ResourcePtr<Framebuffer>;
-
-class Framebuffer{
-    friend class GraphicPipeline;
-
-public:
-    struct Attachment{
-        std::string texName;
-        int texelFormat{0};
-        SamplerParamPtr sp;
-    };
-    struct RenderTarget{
-        std::string outVarName;
-        std::string texName;
-        size_t location{0};
-    };
-
-private:
-    Framebuffer(){}
-public:
-    ~Framebuffer();
-
-public:
-    static FramebufferPtr create(float width = 0, float height = 0, int target = GL_FRAMEBUFFER);
-
-public:
-    void addAttachment(const std::string& outVarName, const Attachment& att);
-    void setDepthAttachment(const Attachment& att);
-    void setStartLocation(size_t location) { startLocation = location; }
-
-    void bind(float x, float y, float width, float height);
-    void bind(float width, float height) { bind(0, 0, width, height); }
-    void bindRect(const float* rect) { bind(rect[0], rect[1], rect[2], rect[3]); }
-    void bindSize(const float* size) { bind(size[0], size[1]); }
-
-    auto getTarget() const { return target; }
-    auto getWidth() const { return texWidth; }
-    auto getHeight() const { return texHeight; }
-    const auto& getTexGroup() { return texGroup; }
-    auto getStartLocation() const { return startLocation; }
-    const auto& getRenderTargets() const { return renderTargets; }
-
-private:
-    auto getHandle() const { return fbHandle; }
-    void setBuffers();
-
-private:
-    int target{0};
-    GLuint fbHandle{0};
-    GLint lastHandle{0};
-
-    float texWidth{0};
-    float texHeight{0};
-
-    TexGroupPtr texGroup;
-
-    std::vector<RenderTarget> renderTargets;
-    std::string depthTexName;
-
-    bool bufferSetted{false};
-    bool withAttachments{false};
-
-    size_t startLocation{0};
-};
-
----
-
---- framebuffer implemention
-//------------------------------
-// framebuffer implemention
-Framebuffer::~Framebuffer(){
-    DEL_OBJECT(glDeleteFramebuffers, fbHandle);
-}
-
-FramebufferPtr Framebuffer::create(float width, float height, int target){
-    auto ptr = new Framebuffer();
-    ptr->target = target;
-    ptr->texWidth = width;
-    ptr->texHeight = height;
-
-    ptr->withAttachments = width != 0 && height != 0;
-
-    if (ptr->withAttachments){
-        GEN_OBJECT(glGenFramebuffers, ptr->fbHandle);
-        ptr->texGroup = TexGroup::create();
-    }
-
-    return FramebufferPtr(ptr);
-}
-
-void Framebuffer::addAttachment(const std::string& outVarName, const Framebuffer::Attachment& att){
-    mAssert(!bufferSetted);
-
-    renderTargets.push_back({outVarName, att.texName, startLocation + renderTargets.size()});
-
-    if (withAttachments){
-        texGroup->create2D(att.texName, {GL_TEXTURE_2D, 1, att.texelFormat, att.sp,
-            (int)texWidth, (int)texHeight});
-    }
-}
-
-void Framebuffer::setDepthAttachment(const Framebuffer::Attachment& att){
-    mAssert(!bufferSetted);
-
-    depthTexName = att.texName;
-
-    texGroup->create2D(att.texName, {GL_TEXTURE_2D, 1, att.texelFormat, att.sp,
-        (int)texWidth, (int)texHeight});
-}
-
-void Framebuffer::setBuffers(){
-    if (bufferSetted) return;
-
-    bufferSetted = true;
-
-    std::vector<GLenum> colorAttachments(startLocation + renderTargets.size(), GL_NONE);
-
-    GLint maxDrawBuffers = 0;
-    glGetIntegerv(GL_MAX_DRAW_BUFFERS, &maxDrawBuffers);
-    mAssert(colorAttachments.size() <= (size_t)maxDrawBuffers);
-
-    for(size_t i = 0; i < renderTargets.size(); ++i){
-        auto handle = texGroup->getHandle(renderTargets[i].texName);
-        glFramebufferTexture(target, GL_COLOR_ATTACHMENT0 + i, handle, 0);
-
-        colorAttachments[renderTargets[i].location] = GL_COLOR_ATTACHMENT0 + i;
-    }
-
-    if (!colorAttachments.empty()){
-        glDrawBuffers(colorAttachments.size(), colorAttachments.data());
-    }
-
-    if (!depthTexName.empty()){
-        auto handle = texGroup->getHandle(depthTexName);
-        glFramebufferTexture(target, GL_DEPTH_ATTACHMENT, handle, 0);
-    }
-
-    mAssert(glCheckFramebufferStatus(target) == GL_FRAMEBUFFER_COMPLETE);
-}
-
-static int getFramebufferBinding(int target){
-    switch(target){
-        case GL_FRAMEBUFFER:      return GL_FRAMEBUFFER_BINDING;
-        case GL_READ_FRAMEBUFFER: return GL_READ_FRAMEBUFFER_BINDING;
-        case GL_DRAW_FRAMEBUFFER: return GL_DRAW_FRAMEBUFFER_BINDING;
-        default: mAssert(false);
-    }
-    return 0;
-}
-
-void Framebuffer::bind(float x, float y, float width, float height){
-    mAssert(width > 0);
-    mAssert(height > 0);
-
-    if (withAttachments){
-        if (width != texWidth || height != texHeight){
-
-            texWidth = width;
-            texHeight = height;
-            bufferSetted = false;
-
-            for(const auto& t : renderTargets){
-                auto st = texGroup->getStorage(t.texName);
-                st.width = (int)texWidth;
-                st.height = (int)texHeight;
-                texGroup->create2D(t.texName, st);
-            }
-
-            if (!depthTexName.empty()){
-                auto st = texGroup->getStorage(depthTexName);
-                st.width = (int)texWidth;
-                st.height = (int)texHeight;
-                texGroup->create2D(depthTexName, st);
-            }
-        }
-    }
-
-    glGetIntegerv(getFramebufferBinding(target), &lastHandle);
-    if ((GLuint)lastHandle != fbHandle){
-        glBindFramebuffer(target, fbHandle);
-    }
-
-    glViewport((GLint)x, (GLint)y, (GLsizei)width, (GLsizei)height);
-    glEnable(GL_SCISSOR_TEST);
-    glScissor((GLint)x, (GLint)y, (GLsizei)width, (GLsizei)height);
-
-    setBuffers();
-}
----
 
 --- graphic pipeline
 //---------------------
@@ -225,6 +29,7 @@ private:
 public:
     static GraphicPipelinePtr create(VertexArrayPtr va, ProgramPtr prog);
     static GraphicPipelinePtr create(VertexArrayPtr va, const std::vector<Shader>& shaders);
+    static GraphicPipelinePtr create(const VertexArray::Buffer& buf, ProgramPtr prog);
     static GraphicPipelinePtr create(const VertexArray::Buffer& buf, VertexLayoutPtr layout);
     static GraphicPipelinePtr create(const VertexArray::Buffer& buf, VertexLayoutPtr layout,
         const std::vector<Shader>& shaders);
@@ -262,6 +67,11 @@ GraphicPipelinePtr GraphicPipeline::create(VertexArrayPtr va, ProgramPtr prog){
     ptr->vertexArray = va;
     ptr->program = prog;
     return GraphicPipelinePtr(ptr);
+}
+
+GraphicPipelinePtr GraphicPipeline::create(const VertexArray::Buffer& buf, ProgramPtr prog){
+    auto va = VertexArray::create(buf, prog->getVertexLayout());
+    return create(va, prog);
 }
 
 GraphicPipelinePtr GraphicPipeline::create(VertexArrayPtr va, const std::vector<Shader>& shaders){
@@ -305,6 +115,12 @@ void GraphicPipeline::setupDrawing(){
     // use vertex array
     if ((GLuint)lastVertexArrayHandle != vertexArray->getHandle()){
         glBindVertexArray(vertexArray->getHandle());
+    }
+
+    // always bind vertex array buffers to prevent them from being lost
+    glBindBuffer(GL_ARRAY_BUFFER, vertexArray->getVertexBufferHandle());
+    if (vertexArray->hasIndexBufferDesc()){
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vertexArray->getIndexBufferHandle());
     }
 }
 

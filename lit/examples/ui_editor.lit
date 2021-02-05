@@ -758,8 +758,7 @@ BlockPtr ImageBlock::create(const std::string& n, const std::string& dir,
     const tow::TexGroupPtr& texGroup, const std::string& atlasName){
 
     if (!texGroup->has(atlasName)){
-        ImageAsset()->loadImage8(
-            dir + atlasName, {texGroup, atlasName}, true);
+        texGroup->add(atlasName, ImageAsset()->loadImage8(dir + atlasName, true));
     }
 
     const auto& st = texGroup->getStorage(atlasName);
@@ -811,7 +810,10 @@ BlockPtr ScaleNineBlock::create(const std::string& n, const std::string& dir,
     const tow::TexGroupPtr& texGroup, const std::string& atlasName,
     const glm::vec4& splitLines){
 
-    ImageAsset()->loadImage8(dir + atlasName, {texGroup, atlasName}, true);
+    if (!texGroup->has(atlasName)){
+        texGroup->add(atlasName, ImageAsset()->loadImage8(dir + atlasName, true));
+    }
+
     const auto& st = texGroup->getStorage(atlasName);
 
     auto bk = new ScaleNineBlock(n);
@@ -1318,7 +1320,9 @@ int ButtonBlock::showMenuItems(const RendererPtr& r, const BlockPtr& rootBlock, 
 
         if (showInputText(app.atlasName)){
             if (texGroup){
-                ImageAsset()->loadImage8(app.atlasName, {texGroup, app.atlasName}, true);
+                if (!texGroup->has(app.atlasName)){
+                    texGroup->add(app.atlasName, ImageAsset()->loadImage8(app.atlasName, true));
+                }
                 if (texGroup->has(app.atlasName)){
                     const auto& st = texGroup->getStorage(app.atlasName);
                     bk->setImageSize({st.width, st.height});
@@ -1535,8 +1539,8 @@ void Renderer::render(const Solution::Pane& pane){
     // set PV matrix
     auto pvMat =
         translate(mat3(1), vec2(-1)) *
-        scale(mat3(1), vec2(2) / vec2(window.size.x, window.size.y)) *
-        translate(mat3(1), vec2(window.size.x, window.size.y) * 0.5f);
+        scale(mat3(1), vec2(2) / vec2(window.width, window.height)) *
+        translate(mat3(1), vec2(window.width, window.height) * 0.5f);
 
     prog->setUniformf("u_pvMat", {&pvMat, 9});
 
@@ -1633,10 +1637,12 @@ public:
 
 private:
     std::string curFilename;
+    std::string lastFilename;
+
     int curTabItemFlags{0};
+
     std::map<std::string, ui::BlockPtr> fileBlockMap;
     std::map<std::string, bool> openFileTabMap;
-    std::string lastFilename;
 
     ui::BlockPtr selectedBlock;
     ui::BlockPtr triBlock;
@@ -1660,6 +1666,8 @@ private:
         std::string samplePath{"sample1.json"};
     };
     Config cfg;
+
+    bool firstEntry{true};
 };
 ---
 
@@ -1711,6 +1719,8 @@ void UiEditor::setup(){
 
     triBlock = ui::GeometryBlock::create("triangle", {}, {});
     triBlock->setMode(GL_TRIANGLES);
+
+    firstEntry = true;
 }
 
 void UiEditor::handleDroppedFiles(){
@@ -1825,19 +1835,17 @@ void UiEditor::deleteBlock(){
 }
 
 void UiEditor::updateFileView(Solution::Pane& pane){
-    auto& window = pane.window;
-    auto& input = pane.input;
-    auto& winSize = window.size;
+    const auto& window = pane.window;
+    const auto& input = pane.input;
     auto& io = GetIO();
 
-    vec2 origin{window.pos.x, window.pos.y};
-    vec2 mousePos{input.x - winSize.x * 0.5f, input.y - winSize.y * 0.5f};
+    vec2 origin{window.x, window.y};
+    vec2 mousePos{input.x - window.width * 0.5f, input.y - window.height * 0.5f};
     vec2 deltaPos{input.dx, -input.dy};
     vec2 localPos = mousePos - origin;
 
     const auto& rootBlock = getCurFileBlock();
     auto& children = rootBlock->getChildren();
-
 
     //---------------------------------------------
     // test triangle whether can be dragged
@@ -1933,6 +1941,14 @@ void UiEditor::updateFileView(Solution::Pane& pane){
         ptr->draw(renderer);
     }
 
+    if (!window.focused){
+        if (!firstEntry){
+            return;
+        }
+    }else{
+        firstEntry = false;
+    }
+
     //-------------------
     // scale root block
     if (io.KeyAlt && input.scrolly){
@@ -1954,9 +1970,6 @@ void UiEditor::updateFileView(Solution::Pane& pane){
         s.y = max(s.y, 0.1f);
         rootBlock->scale(s);
     }
-
-    if (!window.focused) { return; }
-
 
     //----------------------------
     // move or resize block
@@ -2353,9 +2366,9 @@ void UiEditor::showParameter(const ImVec2& rtPos, Solution::Pane& pane){
 
             if (ui::showInputText(app.atlasName)){
                 if (texGroup){
-                    ImageAsset()->loadImage8(
-                        app.atlasName, {texGroup, app.atlasName}, true);
-
+                    if (!texGroup->has(app.atlasName)){
+                        texGroup->add(app.atlasName, ImageAsset()->loadImage8(app.atlasName, true));
+                    }
                     if (texGroup->has(app.atlasName)){
                         const auto& st = texGroup->getStorage(app.atlasName);
                         selectedBlock->setImageSize({st.width, st.height});
@@ -2451,9 +2464,9 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
                     std::vector<uint8_t> pixels;
                     auto psdTexGroup = rootBlock->getAppearance().texGroup;
 
-                    for(const auto& pr : psdTexGroup->getStorageMap()){
+                    for(const auto& pr : psdTexGroup->getTexMap()){
                         const auto& name = pr.first;
-                        const auto& st = pr.second;
+                        const auto& st = pr.second->getStorage();
 
                         pixels.resize(st.width * st.height * 4);
 
@@ -2604,9 +2617,9 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
             BeginChild("stats", {GetWindowContentRegionWidth() * 0.5f, GetFontSize()});
             Text("Draw Calls: %u, FPS: %.1f, Blocks: %u, Vertices: %u, Indices: %u, Textures: %u",
                 renderer->getDrawCmds().size(), io.Framerate, getCurFileBlock()->getChildren().size(),
-                renderer->getBufferGroup()->getItem("b_vertex").elementCount,
-                renderer->getBufferGroup()->getItem("b_index").elementCount,
-                sharedTexGroup->getStorageMap().size());
+                renderer->getBufferGroup()->getDesc("b_vertex").elementCount,
+                renderer->getBufferGroup()->getDesc("b_index").elementCount,
+                sharedTexGroup->getTexMap().size());
             EndChild();
 
             SameLine();
@@ -2668,6 +2681,7 @@ void UiEditor::showBottomBar(Solution::Pane& pane){
             BulletText("When lock a block, you cannot edit its parameter");
         }
         End();
+        firstEntry = !openHelpWindow;
     }
 }
 

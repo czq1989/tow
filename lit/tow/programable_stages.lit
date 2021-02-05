@@ -3,8 +3,6 @@
 //========================
 // programable stages
 
-@{sampler parameter}
-@{texture}
 @{shader}
 @{shader variable}
 @{program}
@@ -14,304 +12,11 @@
 //=================================
 // programable stages implemention
 
-@{sampler parameter implemention}
-@{texture implemention}
 @{shader implemention}
 @{shader variable implemention}
 @{program implemention}
 ---
 
---- sampler parameter
-//----------------------
-// sampler parameter
-class SamplerParam{
-    friend class SamplerSender;
-
-private:
-    SamplerParam() {}
-public:
-    ~SamplerParam();
-
-public:
-    static ResourcePtr<SamplerParam> create();
-
-public:
-    void set(int paramName, const float* params);
-    void set(int paramName, const int* params);
-    void set(int paramName, float params) { set(paramName, &params); }
-    void set(int paramName, int params) { set(paramName, &params); }
-
-    bool hasMipmap() const { return hasMipmapParam; }
-
-private:
-    auto getHandle() const { return handle; }
-
-private:
-    GLuint handle{0};
-    bool hasMipmapParam{false};
-};
-using SamplerParamPtr = ResourcePtr<SamplerParam>;
----
-
---- sampler parameter implemention
-//------------------------------------
-// sampler parameter implemention
-SamplerParam::~SamplerParam(){
-    DEL_OBJECT(glDeleteSamplers, handle);
-}
-
-ResourcePtr<SamplerParam> SamplerParam::create(){
-    auto sp = new SamplerParam();
-
-    GEN_OBJECT(glGenSamplers, sp->handle);
-    sp->set(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    sp->set(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    sp->set(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    sp->set(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    sp->set(GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-
-    return SamplerParamPtr(sp);
-}
-
-void SamplerParam::set(int paramName, const float* params){
-    glSamplerParameterfv(handle, paramName, params);
-}
-
-void SamplerParam::set(int paramName, const int* params){
-    glSamplerParameteriv(handle, paramName, params);
-
-    int param = params[0];
-    if (paramName == GL_TEXTURE_MIN_FILTER){
-        hasMipmapParam = param == GL_NEAREST_MIPMAP_NEAREST ||
-                    param == GL_LINEAR_MIPMAP_NEAREST ||
-                    param == GL_NEAREST_MIPMAP_LINEAR ||
-                    param == GL_LINEAR_MIPMAP_LINEAR;
-    }
-}
----
-
---- texture
-//-------------
-// texture
-class TexGroup{
-    friend class Framebuffer;
-    friend class SamplerSender;
-
-public:
-    struct Item{
-        int pixelFormat{0};
-        size_t level{0};
-        int dataType{GL_UNSIGNED_BYTE};
-    };
-    struct Block{
-        const void* data{nullptr};
-        size_t xoffset{0};
-        size_t yoffset{0};
-        size_t zoffset{0};
-        int width{0};
-        int height{0};
-        int depth{0};
-    };
-    struct Storage{
-        int target{0};
-        size_t levels{1};
-        int texelFormat{0};
-        SamplerParamPtr sampler;
-        int width{0};
-        int height{0};
-        int depth{0};
-    };
-
-    using TexStorageFunc = std::function<void(const Storage&)>;
-    using TexSubFunc = std::function<void(const Storage&, const Block&, const Item&)>;
-
-private:
-    TexGroup();
-
-public:
-    ~TexGroup();
-
-public:
-    static ResourcePtr<TexGroup> create();
-
-public:
-    void create(const std::string& name, const Storage& storage, TexStorageFunc f);
-    void create1D(const std::string& name, const Storage& storage);
-    void create2D(const std::string& name, const Storage& storage);
-    void create3D(const std::string& name, const Storage& storage);
-
-    void write(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item, TexSubFunc f);
-    void write1D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item);
-    void write2D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item);
-    void write3D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item);
-    void writeCubeMap(const std::string& name, const std::vector<TexGroup::Block>& bks,
-        const TexGroup::Item& item);
-
-    void read(const std::string& name, void* data, const TexGroup::Item& item);
-
-    const auto& getStorage(const std::string& name) const { return storageMap.at(name); }
-    const auto& getStorageMap() const { return storageMap; }
-    const auto& getDefaultSampler() const { return defaultSampler; }
-
-    auto getHandle(const std::string& name) const { return handleMap.at(name); }
-
-    auto has(const std::string& name) const { return handleMap.find(name) != handleMap.end(); }
-    void clear();
-    void setDefaultSampler(const SamplerParamPtr& sp) { defaultSampler = sp; }
-
-private:
-    std::map<std::string, GLuint> handleMap;
-    std::map<std::string, Storage> storageMap;
-    SamplerParamPtr defaultSampler;
-};
-using TexGroupPtr = ResourcePtr<TexGroup>;
----
-
---- texture implemention
-//----------------------------
-// texture implemention
-TexGroup::TexGroup(){
-    defaultSampler = SamplerParam::create();
-}
-
-void TexGroup::create(const std::string& name, const TexGroup::Storage& st, TexStorageFunc f){
-    if (handleMap.find(name) != handleMap.end()){
-        DEL_OBJECT(glDeleteTextures, handleMap.at(name));
-    }
-
-    GLuint handle{0};
-    GEN_OBJECT(glGenTextures, handle);
-    glBindTexture(st.target, handle);
-    f(st);
-    glBindTexture(st.target, 0);
-
-    storageMap[name] = st;
-    handleMap[name] = handle;
-
-    if (storageMap[name].sampler == nullptr){
-        storageMap[name].sampler = defaultSampler;
-    }
-}
-
-void TexGroup::create1D(const std::string& name, const TexGroup::Storage& st){
-    create(name, st, [](const TexGroup::Storage& st){
-        glTexStorage1D(st.target, st.levels, st.texelFormat, st.width);
-    });
-}
-
-void TexGroup::create2D(const std::string& name, const TexGroup::Storage& st){
-    create(name, st, [](const TexGroup::Storage& st){
-        glTexStorage2D(st.target, st.levels, st.texelFormat, st.width, st.height);
-    });
-}
-
-void TexGroup::create3D(const std::string& name, const TexGroup::Storage& st){
-    create(name, st, [](const TexGroup::Storage& st){
-        glTexStorage3D(st.target, st.levels, st.texelFormat, st.width, st.height, st.depth);
-    });
-}
-
-void TexGroup::write(const std::string& name, const TexGroup::Block& bk,
-    const TexGroup::Item& item, TexSubFunc f){
-
-    auto st = storageMap.at(name);
-    auto handle = handleMap.at(name);
-
-    mAssert(item.level < st.levels);
-
-    st.width = bk.width == 0 ? st.width >> item.level : bk.width;
-    st.height = bk.height == 0 ? st.height >> item.level : bk.height;
-    st.depth = bk.depth == 0 ? st.depth >> item.level : bk.depth;
-
-    auto ss = Snapshot::create();
-    ss->push(GL_UNPACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_UNPACK_ALIGNMENT, v[0]);});
-    ss->take();
-
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-    glBindTexture(st.target, handle);
-    f(st, bk, item);
-    if (st.sampler && st.sampler->hasMipmap()){
-        glGenerateMipmap(st.target);
-    }
-    glBindTexture(st.target, 0);
-
-    ss->restore();
-}
-
-void TexGroup::write1D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item){
-    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item& item){
-        glTexSubImage1D(st.target, item.level, bk.xoffset,
-            st.width,
-            item.pixelFormat, item.dataType, bk.data);
-    });
-}
-
-void TexGroup::write2D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item){
-    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item& item){
-        glTexSubImage2D(st.target, item.level, bk.xoffset, bk.yoffset,
-            st.width, st.height,
-            item.pixelFormat, item.dataType, bk.data);
-    });
-}
-
-void TexGroup::write3D(const std::string& name, const TexGroup::Block& bk, const TexGroup::Item& item){
-    write(name, bk, item, [](const Storage& st, const TexGroup::Block& bk, const Item& item){
-        glTexSubImage3D(st.target, item.level, bk.xoffset, bk.yoffset, bk.zoffset,
-            st.width, st.height, st.depth,
-            item.pixelFormat, item.dataType, bk.data);
-    });
-}
-
-void TexGroup::writeCubeMap(const std::string& name,
-    const std::vector<TexGroup::Block>& bks, const TexGroup::Item& item){
-
-    for(int i = 0; i < 6; ++i){
-        write(name, bks[i], item, [=](const Storage& st, const TexGroup::Block& bk, const Item& item){
-            glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, item.level, bk.xoffset, bk.yoffset,
-                st.width, st.height,
-                item.pixelFormat, item.dataType, bk.data);
-        });
-    }
-
-}
-
-TexGroup::~TexGroup(){
-    for(const auto& pr : handleMap){
-        DEL_OBJECT(glDeleteTextures, pr.second);
-    }
-}
-
-ResourcePtr<TexGroup> TexGroup::create(){
-    return ResourcePtr<TexGroup>(new TexGroup());
-}
-
-void TexGroup::read(const std::string& name, void* data, const TexGroup::Item& item){
-    const auto& st = getStorage(name);
-    auto handle = getHandle(name);
-
-    mAssert(item.level < st.levels);
-
-    auto ss = Snapshot::create();
-    ss->push(GL_PACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_PACK_ALIGNMENT, v[0]);});
-    ss->take();
-
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glBindTexture(st.target, handle);
-    glGetTexImage(st.target, item.level, item.pixelFormat, item.dataType, data);
-    glBindTexture(st.target, 0);
-
-    ss->restore();
-}
-
-void TexGroup::clear(){
-    for(const auto& pr : handleMap){
-        DEL_OBJECT(glDeleteTextures, pr.second);
-    }
-    handleMap.clear();
-    storageMap.clear();
-}
----
 
 --- shader
 //---------------
@@ -448,11 +153,14 @@ public:
     }
 
     // sampler
-    void setSampler(TexGroupPtr texture, const std::string& texName, const std::string& uniformName){
-        samplerSender.setSampler(uniformName, {texture, texName});
+    void setSampler(TexGroupPtr texGroup, const std::string& texName, const std::string& uniformName){
+        samplerSender.setSampler(uniformName, texGroup->getTexture(texName));
     }
-    void setSampler(TexGroupPtr texture, const std::string& texName) {
-        samplerSender.setSampler(texName, {texture, texName});
+    void setSampler(TexGroupPtr texGroup, const std::string& texName) {
+        samplerSender.setSampler(texName, texGroup->getTexture(texName));
+    }
+    void setSampler(const std::string& uniformName, const TexturePtr& tex){
+        samplerSender.setSampler(uniformName, tex);
     }
 
     // block
@@ -472,6 +180,11 @@ public:
     void setProgramOutputLocation(const std::string& name, int location){
         assert(!isLinked());
         progOutputSender.setLocation(name, location);
+    }
+    void setProgramOutputLocations(const FramebufferPtr& fb){
+        for(const auto& pr : fb->getAttachments()){
+            setProgramOutputLocation(pr.first, pr.second.location);
+        }
     }
 
     // shader tag

@@ -1,0 +1,675 @@
+
+--- buffer
+//=======================
+// buffer
+
+@{buffer group}
+@{sampler parameter}
+@{texture}
+---
+
+--- buffer implemention
+//=========================
+// buffer implemention
+
+@{buffer group implemention}
+@{sampler parameter implemention}
+@{texture implemention}
+---
+
+--- buffer group
+//----------------------
+// buffer group
+class BufferGroup;
+using BufferGroupPtr = ResourcePtr<BufferGroup>;
+
+class BufferGroup{
+    friend class VertexArray;
+    friend class BufferBinding;
+    friend class Texture;
+
+public:
+    struct Description{
+        int target{0};
+        size_t byteElement{0};
+        size_t elementCount{0};
+        int usage{GL_STATIC_DRAW};
+    };
+    struct Block{
+        const void* data{nullptr};
+        size_t offset{0};
+        size_t size{0};
+    };
+    struct MappedBuffer{
+        friend class BufferGroup;
+    public:
+        void* begin();
+        void write(const Block& bk);
+        void end();
+
+    private:
+        GLuint handle{0};
+        int target{0};
+        int access{0};
+        void *ptr{nullptr};
+    };
+
+private:
+    BufferGroup(){}
+public:
+    ~BufferGroup();
+public:
+    static ResourcePtr<BufferGroup> create();
+
+public:
+    const auto& getDesc(const std::string& name) const { return descMap.at(name); }
+    MappedBuffer getMappedBuffer(const std::string& name, int access = GL_WRITE_ONLY);
+
+    void createBuffer(const std::string& name, const void* data, const Description& desc);
+
+    void write(const std::string& name, const void* data, size_t offset, size_t size);
+    void write(const std::string& name, const std::vector<Block>& blocks);
+    void write(const std::string& name, const Block& block) { write(name, {block}); }
+
+    auto has(const std::string& name) const { return descMap.find(name) != descMap.end(); }
+
+private:
+    auto getHandle(const std::string& name) const { return handleMap.at(name); }
+
+private:
+    std::map<std::string, GLuint> handleMap;
+    std::map<std::string, Description> descMap;
+};
+---
+
+--- buffer group implemention
+//-----------------------------
+// buffer group implemention
+BufferGroup::~BufferGroup(){
+    for(const auto& pr : handleMap){
+        DEL_OBJECT(glDeleteBuffers, pr.second);
+    }
+}
+
+BufferGroupPtr BufferGroup::create(){
+    return BufferGroupPtr(new BufferGroup());
+}
+
+void BufferGroup::createBuffer(const std::string& name, const void* data, const Description& desc){
+    descMap[name] = desc;
+
+    if (handleMap.find(name) == handleMap.end()){
+        GEN_OBJECT(glGenBuffers, handleMap[name]);
+    }
+
+    glBindBuffer(desc.target, handleMap[name]);
+    glBufferData(desc.target, desc.byteElement * desc.elementCount, data, desc.usage);
+    glBindBuffer(desc.target, 0);
+}
+
+void BufferGroup::write(const std::string& name, const void* data, size_t offset, size_t size){
+    auto& desc = descMap.at(name);
+
+    glBindBuffer(desc.target, handleMap.at(name));
+    glBufferSubData(desc.target, offset, size, data);
+    glBindBuffer(desc.target, 0);
+}
+
+void BufferGroup::write(const std::string& name, const std::vector<BufferGroup::Block>& blocks){
+    for(const auto& bk : blocks){
+        write(name, bk.data, bk.offset, bk.size);
+    }
+}
+
+BufferGroup::MappedBuffer BufferGroup::getMappedBuffer(const std::string& name, int access){
+    BufferGroup::MappedBuffer buf;
+    buf.handle = getHandle(name);
+    buf.target = getDesc(name).target;
+    buf.access = access;
+    return buf;
+}
+
+void* BufferGroup::MappedBuffer::begin(){
+    mAssert(!ptr);
+    glBindBuffer(target, handle);
+    ptr = glMapBuffer(target, access);
+    mAssert(ptr);
+    return ptr;
+}
+
+void BufferGroup::MappedBuffer::write(const BufferGroup::Block& bk){
+    mAssert(ptr);
+    memcpy((uint8_t*)ptr + bk.offset, bk.data, bk.size);
+}
+
+void BufferGroup::MappedBuffer::end(){
+    mAssert(ptr);
+    glUnmapBuffer(target);
+    ptr = nullptr;
+}
+---
+
+
+--- sampler parameter
+//----------------------
+// sampler parameter
+class SamplerParam;
+using SamplerParamPtr = ResourcePtr<SamplerParam>;
+
+class SamplerParam{
+    friend class SamplerSender;
+
+private:
+    SamplerParam() {}
+public:
+    ~SamplerParam();
+
+public:
+    static ResourcePtr<SamplerParam> create();
+
+public:
+    void set(int paramName, const float* params);
+    void set(int paramName, const int* params);
+    void set(int paramName, float params) { set(paramName, &params); }
+    void set(int paramName, int params) { set(paramName, &params); }
+
+    bool hasMipmap() const { return hasMipmapParam; }
+
+private:
+    auto getHandle() const { return handle; }
+
+private:
+    GLuint handle{0};
+    bool hasMipmapParam{false};
+};
+---
+
+--- sampler parameter implemention
+//------------------------------------
+// sampler parameter implemention
+SamplerParam::~SamplerParam(){
+    DEL_OBJECT(glDeleteSamplers, handle);
+}
+
+ResourcePtr<SamplerParam> SamplerParam::create(){
+    auto sp = new SamplerParam();
+
+    GEN_OBJECT(glGenSamplers, sp->handle);
+    sp->set(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    sp->set(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    sp->set(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    sp->set(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    sp->set(GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    return SamplerParamPtr(sp);
+}
+
+void SamplerParam::set(int paramName, const float* params){
+    glSamplerParameterfv(handle, paramName, params);
+}
+
+void SamplerParam::set(int paramName, const int* params){
+    glSamplerParameteriv(handle, paramName, params);
+
+    int param = params[0];
+    if (paramName == GL_TEXTURE_MIN_FILTER){
+        hasMipmapParam = param == GL_NEAREST_MIPMAP_NEAREST ||
+                    param == GL_LINEAR_MIPMAP_NEAREST ||
+                    param == GL_NEAREST_MIPMAP_LINEAR ||
+                    param == GL_LINEAR_MIPMAP_LINEAR;
+    }
+}
+---
+
+--- texture
+//-------------
+// texture
+class Texture;
+using TexturePtr = tow::ResourcePtr<Texture>;
+
+class Texture{
+    friend class Framebuffer;
+    friend class SamplerSender;
+
+public:
+    struct Item{
+        int pixelFormat{0};
+        size_t level{0};
+        int dataType{GL_UNSIGNED_BYTE};
+    };
+    struct Block{
+        const void* data{nullptr};
+        size_t xoffset{0};
+        size_t yoffset{0};
+        size_t zoffset{0};
+        int width{0};
+        int height{0};
+        int depth{0};
+        BufferGroupPtr bufGroup;
+        std::string bufName;
+    };
+    struct Storage{
+        int target{0};
+        size_t levels{1};
+        int texelFormat{0};
+        SamplerParamPtr sampler;
+        int width{0};
+        int height{0};
+        int depth{0};
+    };
+    enum Dimension{
+        TEX_1D = 0,
+        TEX_2D,
+        TEX_3D
+    };
+
+    using TexStorageFunc = std::function<void(const Storage&)>;
+    using TexSubFunc = std::function<void(const Storage&, const Block&, const Item&)>;
+
+private:
+    Texture(){
+        defaultSampler = SamplerParam::create();
+    }
+
+public:
+    ~Texture(){
+        free();
+    }
+
+public:
+    static TexturePtr create(const Storage& storage, Dimension d, TexStorageFunc f);
+    static TexturePtr create1D(const Storage& storage);
+    static TexturePtr create2D(const Storage& storage);
+    static TexturePtr create3D(const Storage& storage);
+
+public:
+    void write(const Texture::Block& bk, const Texture::Item& item, TexSubFunc f);
+    void write1D(const Texture::Block& bk, const Texture::Item& item);
+    void write2D(const Texture::Block& bk, const Texture::Item& item);
+    void write3D(const Texture::Block& bk, const Texture::Item& item);
+    void writeCubeMap(const std::vector<Texture::Block>& bks, const Texture::Item& item);
+
+    void read(void* data, const Texture::Item& item);
+    void copyTo(const TexturePtr& dstTex);
+
+    const auto& getStorage() const { return storage; }
+    const auto& getSampler() const { return storage.sampler; }
+    auto getHandle() const { return handle; }
+
+    void resize(const Storage& st, TexStorageFunc f);
+    void resize1D(int width);
+    void resize2D(int width, int height);
+    void resize3D(int width, int height, int depth);
+
+    void clear(size_t bytes, const void* data, const Item& item, TexSubFunc f);
+    void clear1D(size_t bytes, const void* data, const Item& item);
+    void clear2D(size_t bytes, const void* data, const Item& item);
+    void clear3D(size_t bytes, const void* data, const Item& item);
+    void clearCubemap(size_t bytes, const void* data, const Item& item);
+
+    void clear1D(size_t bytes, const Item& item) { clear1D(bytes, nullptr, item); }
+    void clear2D(size_t bytes, const Item& item) { clear2D(bytes, nullptr, item); }
+    void clear3D(size_t bytes, const Item& item) { clear3D(bytes, nullptr, item); }
+    void clearCubemap(size_t bytes, const Item& item) { clear1D(bytes, nullptr, item); }
+
+private:
+    void free();
+
+private:
+    GLuint handle{0};
+    Storage storage;
+    SamplerParamPtr defaultSampler;
+    Dimension dimension;
+};
+
+//--------------------
+// texture group
+class TexGroup;
+using TexGroupPtr = tow::ResourcePtr<TexGroup>;
+
+class TexGroup{
+    friend class Framebuffer;
+    friend class SamplerSender;
+
+private:
+    TexGroup(){}
+
+public:
+    ~TexGroup(){}
+
+public:
+    static TexGroupPtr create(){
+        return TexGroupPtr(new TexGroup());
+    }
+
+public:
+    auto has(const std::string& name) const {
+        return texMap.find(name) != texMap.end();
+    }
+    const auto& getTexture(const std::string& name) const{
+        assert(has(name));
+        return texMap.at(name);
+    }
+
+    void create1D(const std::string& name, const Texture::Storage& st){
+        assert(!has(name));
+        texMap.insert({name, Texture::create1D(st)});
+    }
+    void create2D(const std::string& name, const Texture::Storage& st){
+        assert(!has(name));
+        texMap.insert({name, Texture::create2D(st)});
+    }
+    void create3D(const std::string& name, const Texture::Storage& st){
+        assert(!has(name));
+        texMap.insert({name, Texture::create3D(st)});
+    }
+
+    void write1D(const std::string& name, const Texture::Block& bk, const Texture::Item& item){
+        getTexture(name)->write1D(bk, item);
+    }
+    void write2D(const std::string& name, const Texture::Block& bk, const Texture::Item& item){
+        getTexture(name)->write2D(bk, item);
+    }
+    void write3D(const std::string& name, const Texture::Block& bk, const Texture::Item& item){
+        getTexture(name)->write3D(bk, item);
+    }
+    void writeCubeMap(const std::string& name, const std::vector<Texture::Block>& bks,
+        const Texture::Item& item){
+
+        getTexture(name)->writeCubeMap(bks, item);
+    }
+
+    void read(const std::string& name, void* data, const Texture::Item& item){
+        getTexture(name)->read(data, item);
+    }
+
+    void resize1D(const std::string& name, int width){
+        getTexture(name)->resize1D(width);
+    }
+    void resize2D(const std::string& name, int width, int height){
+        getTexture(name)->resize2D(width, height);
+    }
+    void resize3D(const std::string& name, int width, int height, int depth){
+        getTexture(name)->resize3D(width, height, depth);
+    }
+
+    void add(const std::string& name, const TexturePtr& tex){
+        assert(!has(name));
+        texMap.insert({name, tex});
+    }
+    void remove(const std::string& name) {
+        assert(has(name));
+        texMap.erase(name);
+    }
+    void clear() {
+        texMap.clear();
+    }
+    const auto& getStorage(const std::string& name) const {
+        return getTexture(name)->getStorage();
+    }
+    const auto& getSampler(const std::string& name) const {
+        return getTexture(name)->getSampler();
+    }
+    auto getHandle(const std::string& name) const {
+        return getTexture(name)->getHandle();
+    }
+
+    const auto& getTexMap() const { return texMap; }
+
+
+private:
+    std::unordered_map<std::string, TexturePtr> texMap;
+};
+---
+
+--- texture implemention
+//----------------------
+// texture implemention
+TexturePtr Texture::create(const Storage& st, Dimension d, TexStorageFunc f){
+    mAssert(st.width > 0);
+
+    auto ptr = new Texture();
+
+    GLuint handle{0};
+    GEN_OBJECT(glGenTextures, handle);
+    glBindTexture(st.target, handle);
+    f(st);
+    glBindTexture(st.target, 0);
+
+    ptr->handle = handle;
+    ptr->dimension = d;
+    ptr->storage = st;
+    if (!st.sampler){
+        ptr->storage.sampler = ptr->defaultSampler;
+    }
+
+    return TexturePtr(ptr);
+}
+
+TexturePtr Texture::create1D(const Storage& st){
+    return create(st, Dimension::TEX_1D, [](const Storage& st){
+        glTexStorage1D(st.target, st.levels, st.texelFormat, st.width);
+    });
+}
+
+TexturePtr Texture::create2D(const Storage& st){
+    return create(st, Dimension::TEX_2D, [](const Storage& st){
+        glTexStorage2D(st.target, st.levels, st.texelFormat, st.width, st.height);
+    });
+}
+
+TexturePtr Texture::create3D(const Storage& st){
+    return create(st, Dimension::TEX_3D, [](const Storage& st){
+        glTexStorage3D(st.target, st.levels, st.texelFormat, st.width, st.height, st.depth);
+    });
+}
+
+void Texture::write(const Block& bk, const Item& item, TexSubFunc f){
+    auto st = storage;
+
+    mAssert(item.level < st.levels);
+
+    st.width = bk.width == 0 ? st.width >> item.level : bk.width;
+    st.height = bk.height == 0 ? st.height >> item.level : bk.height;
+    st.depth = bk.depth == 0 ? st.depth >> item.level : bk.depth;
+
+    auto ss = Snapshot::create();
+    ss->push(GL_UNPACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_UNPACK_ALIGNMENT, v[0]);});
+    ss->take();
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+    glBindTexture(st.target, handle);
+
+    if(bk.bufGroup){
+        const auto& desc = bk.bufGroup->getDesc(bk.bufName);
+        mAssert(desc.target == GL_PIXEL_UNPACK_BUFFER);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, bk.bufGroup->getHandle(bk.bufName));
+    }
+
+    f(st, bk, item);
+
+    if (st.sampler && st.sampler->hasMipmap()){
+        glGenerateMipmap(st.target);
+    }
+
+    if (bk.bufGroup){
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    }
+
+    glBindTexture(st.target, 0);
+
+    ss->restore();
+}
+
+void Texture::write1D(const Block& bk, const Item& item){
+    mAssert(dimension == Dimension::TEX_1D);
+
+    write(bk, item, [](const Storage& st, const Block& bk, const Item& item){
+        glTexSubImage1D(st.target, item.level, bk.xoffset,
+            st.width,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void Texture::write2D(const Block& bk, const Item& item){
+    mAssert(dimension == Dimension::TEX_2D);
+
+    write(bk, item, [](const Storage& st, const Block& bk, const Item& item){
+        glTexSubImage2D(st.target, item.level, bk.xoffset, bk.yoffset,
+            st.width, st.height,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void Texture::write3D(const Block& bk, const Item& item){
+    mAssert(dimension == Dimension::TEX_3D);
+
+    write(bk, item, [](const Storage& st, const Block& bk, const Item& item){
+        glTexSubImage3D(st.target, item.level, bk.xoffset, bk.yoffset, bk.zoffset,
+            st.width, st.height, st.depth,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void Texture::writeCubeMap(const std::vector<Block>& bks, const Item& item){
+    mAssert(dimension == Dimension::TEX_2D);
+
+    for(int i = 0; i < 6; ++i){
+        write(bks[i], item, [=](const Storage& st, const Block& bk, const Item& item){
+            glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, item.level, bk.xoffset, bk.yoffset,
+                st.width, st.height,
+                item.pixelFormat, item.dataType, bk.data);
+        });
+    }
+}
+
+void Texture::free(){
+    DEL_OBJECT(glDeleteTextures, handle);
+    handle = 0;
+}
+
+void Texture::read(void* data, const Item& item){
+    const auto& st = storage;
+
+    mAssert(item.level < st.levels);
+
+    auto ss = Snapshot::create();
+    ss->push(GL_PACK_ALIGNMENT, [](const GLint* v){glPixelStorei(GL_PACK_ALIGNMENT, v[0]);});
+    ss->take();
+
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glBindTexture(st.target, handle);
+    glGetTexImage(st.target, item.level, item.pixelFormat, item.dataType, data);
+    glBindTexture(st.target, 0);
+
+    ss->restore();
+}
+
+void Texture::copyTo(const TexturePtr& dstTex){
+    const auto& dstStorge = dstTex->getStorage();
+
+    mAssert(storage.width <= dstStorge.width);
+    mAssert(storage.height <= dstStorge.height);
+    mAssert(storage.depth <= dstStorge.depth);
+
+    glCopyImageSubData(
+        handle,
+        storage.target,
+        0, 0, 0, 0,
+        dstTex->getHandle(),
+        dstStorge.target,
+        0, 0, 0, 0,
+        storage.width, std::max(storage.height, 1), std::max(storage.depth, 1));
+}
+
+void Texture::clear(size_t bytes, const void* data, const Item& item, TexSubFunc f){
+    GLuint bufHandle{0};
+    GEN_OBJECT(glGenBuffers, bufHandle);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, bufHandle);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, bytes, nullptr, GL_STATIC_DRAW);
+    glClearBufferData(GL_PIXEL_UNPACK_BUFFER, storage.texelFormat, item.pixelFormat, item.dataType, data);
+
+    write({}, item, f);
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    DEL_OBJECT(glDeleteBuffers, bufHandle);
+}
+
+void Texture::clear1D(size_t bytes, const void* data, const Item& item){
+    clear(bytes, data, item, [](const Storage& st, const Block& bk, const Item& item){
+        glTexSubImage1D(st.target, item.level, bk.xoffset,
+            st.width,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void Texture::clear2D(size_t bytes, const void* data, const Item& item){
+    clear(bytes, data, item, [](const Storage& st, const Block& bk, const Item& item){
+        glTexSubImage2D(st.target, item.level, bk.xoffset, bk.yoffset,
+            st.width, st.height,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void Texture::clear3D(size_t bytes, const void* data, const Item& item){
+    clear(bytes, data, item, [](const Storage& st, const Block& bk, const Item& item){
+        glTexSubImage3D(st.target, item.level, bk.xoffset, bk.yoffset, bk.zoffset,
+            st.width, st.height, st.depth,
+            item.pixelFormat, item.dataType, bk.data);
+    });
+}
+
+void Texture::clearCubemap(size_t bytes, const void* data, const Item& item){
+    for(int i = 0; i < 6; ++i){
+        clear(bytes, data, item, [=](const Storage& st, const Block& bk, const Item& item){
+            glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, item.level, bk.xoffset, bk.yoffset,
+                st.width, st.height,
+                item.pixelFormat, item.dataType, bk.data);
+        });
+    }
+}
+
+void Texture::resize(const Storage& st, TexStorageFunc f){
+    free();
+
+    GEN_OBJECT(glGenTextures, handle);
+    glBindTexture(st.target, handle);
+    f(st);
+    glBindTexture(st.target, 0);
+}
+
+void Texture::resize1D(int width){
+    mAssert(dimension == Dimension::TEX_1D);
+
+    auto& st = storage;
+    st.width = width;
+    resize(st, [](const Storage& st){
+        glTexStorage1D(st.target, st.levels, st.texelFormat, st.width);
+    });
+}
+
+void Texture::resize2D(int width, int height){
+    mAssert(dimension == Dimension::TEX_2D);
+
+    auto& st = storage;
+    st.width = width;
+    st.height = height;
+    resize(st, [](const Storage& st){
+        glTexStorage2D(st.target, st.levels, st.texelFormat, st.width, st.height);
+    });
+}
+
+void Texture::resize3D(int width, int height, int depth){
+    mAssert(dimension == Dimension::TEX_3D);
+
+    auto& st = storage;
+    st.width = width;
+    st.height = height;
+    st.depth = depth;
+    resize(st, [](const Storage& st){
+        glTexStorage3D(st.target, st.levels, st.texelFormat, st.width, st.height, st.depth);
+    });
+}
+
+---

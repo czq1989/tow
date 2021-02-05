@@ -11,21 +11,21 @@ tow::GraphicPipelinePtr pipeline;
 
 void init(){
     using namespace tow;
-    
+
     fb = Framebuffer::create();
-    
+
     vec2 vertices[] = { {-1, -1}, {1, -1}, {0, 1} };
     auto layout = VertexLayout::create();
     layout->add("a_position", {GL_FLOAT, 2});
     layout->stride(sizeof(vec2));
-    
+
     auto bufGroup = BufferGroup::create();
     bufGroup->createBuffer("b_vertex", vertices, {GL_ARRAY_BUFFER, sizeof(vec2), 3});
-    
+
     pipeline = GraphicPipeline::create({bufGroup, "b_vertex"}, layout);
 }
 
-void render(float x, float y, float w, float h){    
+void render(int x, int y, int w, int h){
     fb->bind(x, y, w, h);
     tow::drawArrays(pipeline, GL_TRIANGLES);
 }

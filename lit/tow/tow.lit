@@ -19,7 +19,9 @@ namespace tow{
 @{debug}
 @{resource pointer}
 @{snapshot}
+@{buffer}
 @{vertex specification}
+@{framebuffer}
 @{programable stages}
 @{pipeline}
 @{draw functions}
@@ -78,7 +80,9 @@ namespace tow{
 @{debug implemention}
 @{snapshot implemention}
 @{utility}
+@{buffer implemention}
 @{vertex specification implemention}
+@{framebuffer implemention}
 @{programable stages implemention}
 @{pipeline implemention}
 @{draw functions implemention}
@@ -416,8 +420,10 @@ do{\
 }while(0)
 ----
 
+@include tow\buffer.lit
 @include tow\vertex_specification.lit
 @include tow\programable_stages.lit
+@include tow\framebuffer.lit
 @include tow\pipeline.lit
 @include tow\draw_functions.lit
 

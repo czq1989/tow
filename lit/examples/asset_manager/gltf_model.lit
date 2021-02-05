@@ -831,8 +831,8 @@ std::vector<GltfMeshPtr> GltfMeshCreator::create(const tinygltf::Model* model,
 
             //------------------------------
             // fill vertex buffer
-            const auto& vertexItem = bufGroup->getItem("b_vertex");
-            auto vertexCopiedCount = bufByteCount.vertex / vertexItem.byteElement;
+            const auto& vertBufDesc = bufGroup->getDesc("b_vertex");
+            auto vertexCopiedCount = bufByteCount.vertex / vertBufDesc.byteElement;
             size_t vertexCount = 0;
 
             for(const auto& pr : vertexLayout->getAttribMap()){
@@ -864,11 +864,11 @@ std::vector<GltfMeshPtr> GltfMeshCreator::create(const tinygltf::Model* model,
             size_t indexCount = 0;
             size_t startIndex = 0;
 
-            if (bufGroup->getItem("b_index").elementCount){
+            if (bufGroup->getDesc("b_index").elementCount){
                 GltfBuffer tfIndexBuffer(model, primitive.indices);
 
-                const auto& indexItem = bufGroup->getItem("b_index");
-                auto indexCopiedCount = bufByteCount.index / indexItem.byteElement;
+                const auto& indexBufDesc = bufGroup->getDesc("b_index");
+                auto indexCopiedCount = bufByteCount.index / indexBufDesc.byteElement;
 
                 indexCount = tfIndexBuffer.count;
                 startIndex = indexCopiedCount;
@@ -1895,7 +1895,7 @@ GltfModel::GltfModel(const tinygltf::Model* m, const std::vector<tow::Shader>& s
     }
 
     for(const auto& tfMaterial : tfMaterials){
-        numTextures += tfMaterial->texGroup->getStorageMap().size();
+        numTextures += tfMaterial->texGroup->getTexMap().size();
     }
 
     //-----------------------
