@@ -681,10 +681,10 @@ DrawingBoard::DrawingBoard(const glm::ivec2& size){
 
     //-----------------
     // brush
-    brush = Brush::create("circleBrush", 150);
+    brush = Brush::create("circleBrush", 2);
     brush->param.color = vec3(0, 0, 0);
     brush->param.spacing = 0.1f;
-    brush->param.hardness = 0.1f;
+    brush->param.hardness = 1.0f;
 
     brushRenderer = BrushRenderer::create(size);
 
