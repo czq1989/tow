@@ -69,7 +69,7 @@ $(block_world_editor_src)/dummy.target : $(block_world_editor_lit)
 #------------------------------------------------
 # simple paint
 simple_paint_src := ../source/examples/simple_paint
-simple_paint_lit := examples/simple_paint_ver2.lit
+simple_paint_lit := examples/simple_paint.lit
 
 $(simple_paint_src)/dummy.target : $(simple_paint_lit)
 	../tools/lit -t $? dummy.lit -odir $(simple_paint_src)
