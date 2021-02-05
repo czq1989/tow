@@ -1094,8 +1094,7 @@ void SimplePaint::showBottomBar(){
         openHelpWindow = true;
     }
     SameLine();
-    Text("Draw Calls: %u, FPS: %.1f, Blocks: %u",
-        0, io.Framerate, 0);
+    Text("FPS: %.1f", io.Framerate);
     End();
 
     if (openHelpWindow){
