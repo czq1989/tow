@@ -56,7 +56,7 @@ int main(){
     sln->add<UiEditor>("UI Editor");
     sln->add<BlockWorldEditor>("Block World Editor");
     sln->add<SimplePaint>("Simple Paint");
-    sln->start(4);
+    sln->start(0);
 
     // enable gl debug
     tow::enableDebugMessageOutput();
