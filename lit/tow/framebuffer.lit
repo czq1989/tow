@@ -111,9 +111,7 @@ void Framebuffer::addAttachment(const std::string& outVarName, const Framebuffer
 void Framebuffer::setAttachmentTexture(const std::string& outVarName, const TexturePtr& tex){
     mAssert(fbHandle > 0);
     mAssert(hasAttachment(outVarName));
-
-    const auto& st = tex->getStorage();
-    mAssert(st.width == texWidth && st.height == texHeight);
+    mAssert(tex->getWidth() == texWidth && tex->getHeight() == texHeight);
 
     const auto& att = getAttachment(outVarName);
 
@@ -133,9 +131,7 @@ void Framebuffer::setDepthAttachment(const Framebuffer::Item& item){
 
 void Framebuffer::setDepthAttachment(const TexturePtr& tex){
     mAssert(fbHandle > 0);
-
-    const auto& st = tex->getStorage();
-    mAssert(st.width == texWidth && st.height == texHeight);
+    mAssert(tex->getWidth() == texWidth && tex->getHeight() == texHeight);
 
     depthAttachment.tex = tex;
 

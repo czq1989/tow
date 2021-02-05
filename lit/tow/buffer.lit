@@ -295,6 +295,9 @@ public:
     const auto& getStorage() const { return storage; }
     const auto& getSampler() const { return storage.sampler; }
     auto getHandle() const { return handle; }
+    auto getWidth() const { return storage.width; }
+    auto getHeight() const { return storage.height; }
+    auto getDepth() const { return storage.depth; }
 
     void resize(const Storage& st, TexStorageFunc f);
     void resize1D(int width);
@@ -482,8 +485,7 @@ void Texture::write(const Block& bk, const Item& item, TexSubFunc f){
     glBindTexture(st.target, handle);
 
     if(bk.bufGroup){
-        const auto& desc = bk.bufGroup->getDesc(bk.bufName);
-        mAssert(desc.target == GL_PIXEL_UNPACK_BUFFER);
+        mAssert(bk.bufGroup->getDesc(bk.bufName).target == GL_PIXEL_UNPACK_BUFFER);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, bk.bufGroup->getHandle(bk.bufName));
     }
 
