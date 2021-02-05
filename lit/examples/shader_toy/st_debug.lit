@@ -19,7 +19,15 @@ void main(){
 ---
 
 --- main code
-void mainImage(out vec4 fragColor, in vec2 fragCoord){
-    fragColor = vec4(vec3(0), 1);
+void mainImage( out vec4 fragColor, in vec2 fragCoord ){
+    float pi = 3.14159265359;
+    vec2 uv  = abs(fragCoord/iResolution.xy - vec2(0.5, 0.5));
+    vec3 sdf = 2.*vec3( max(uv.x, uv.y), uv.x + uv.y, length(uv) );
+    // square rombus and circle do not accurately describe the shapes but they all have 6 letters...
+    float square = clamp(2.*cos(iTime)-0.5, 0., 1.);
+    float rombus = clamp(2.*cos(iTime+(2.*pi/3.))-0.5, 0., 1.);
+    float circle = clamp(2.*cos(iTime+(4.*pi/3.))-0.5, 0., 1.);
+    float len = sqrt(square*sdf.x*sdf.x + rombus*sdf.y*sdf.y + circle*sdf.z*sdf.z);
+    fragColor = vec4(len > .5 ? vec3(1) : vec3(0), 1.);
 }
 ---
