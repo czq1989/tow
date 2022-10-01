@@ -62,7 +62,6 @@ git clone https://gitclone.com/github.com/czq1989/tow.git
 
 A viewer that can load [gltf/glb](https://github.com/KhronosGroup/glTF/blob/master/README.md) file, and supports PBR, skin, morph target, and animation. Most files I have tested are from [sketchfab](https://sketchfab.com/3d-models?features=downloadable&sort_by=-likeCount) and [GeneratedAssets](https://github.com/KhronosGroup/glTF-Asset-Generator), however, in order to keep this repository small, I don't put all of them into the assets folder.
 
-![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer.png)
 ![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer_1.png)
 ![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer_2.png)
 ![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer_3.png)
