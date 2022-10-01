@@ -64,6 +64,7 @@ A viewer that can load [gltf/glb](https://github.com/KhronosGroup/glTF/blob/mast
 
 ![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer.png)
 ![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer_1.png)
+![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer_2.png)
 
 ### Shader Toy
 
