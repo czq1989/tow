@@ -62,33 +62,33 @@ git clone https://gitclone.com/github.com/czq1989/tow.git
 
 A viewer that can load [gltf/glb](https://github.com/KhronosGroup/glTF/blob/master/README.md) file, and supports PBR, skin, morph target, and animation. Most files I have tested are from [sketchfab](https://sketchfab.com/3d-models?features=downloadable&sort_by=-likeCount) and [GeneratedAssets](https://github.com/KhronosGroup/glTF-Asset-Generator), however, in order to keep this repository small, I don't put all of them into the assets folder.
 
-![gltf_model_viewer_1.png](https://www.imgpp.com/s1/2022/11/05/gltf_model_viewer_1.png)
-![gltf_model_viewer_2.png](https://www.imgpp.com/s1/2022/11/05/gltf_model_viewer_2.png)
-![gltf_model_viewer_3.png](https://www.imgpp.com/s1/2022/11/05/gltf_model_viewer_3.png)
+![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer_1.png)
+![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer_2.png)
+![gltf_model_viewer](https://github.com/czq1989/tow/wiki/images/gltf_model_viewer_3.png)
 
 ### Shader Toy
 
 A simple [shader toy](https://www.shadertoy.com/) emulator that you can write glsl code to implement cool graphic effects.
 
-![shader_toy.png](https://www.imgpp.com/s1/2022/11/05/shader_toy.png)
+![shader_toy](https://github.com/czq1989/tow/wiki/images/shader_toy.png)
 
 ### UI Editor
 
 An editor that is used to edit game UI elements. If you have a [PSD](https://en.wikipedia.org/wiki/Adobe_Photoshop#File_format) file that all UI elements have already been arranged, drop it into the editor, then you can make some changes again or save it as a JSON file.
 
-![ui_editor.png](https://www.imgpp.com/s1/2022/11/05/ui_editor.png)
+![ui_editor](https://github.com/czq1989/tow/wiki/images/ui_editor.png)
 
 ### Block World Editor
 
 A block editor like Minecraft, but easier to select and create blocks.
 
-![block_world_editor.png](https://www.imgpp.com/s1/2022/11/05/block_world_editor.png)
+![block_world_editor](https://github.com/czq1989/tow/wiki/images/block_world_editor.png)
 
 ### Simple Paint
 
 A simple and fast paint tool based on SDF supports undo, redo and layer blending.
 
-![simple_paint.png](https://www.imgpp.com/s1/2022/11/05/simple_paint.png)
+![simple paint](https://github.com/czq1989/tow/wiki/images/simple_paint.png)
 
 ## Credits
 
